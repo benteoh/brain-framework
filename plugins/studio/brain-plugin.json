@@ -1,0 +1,23 @@
+{
+  "name": "studio",
+  "version": "0.1.0",
+  "brain": ">=0.1.0 <0.2.0",
+  "description": "Optional local rendering, interaction, annotation, and artifact persistence for agent-directed learning.",
+  "dataRoot": "Artifacts",
+  "skills": [
+    "studio"
+  ],
+  "provides": [
+    "render:markdown",
+    "render:mdx",
+    "render:html",
+    "annotate:text",
+    "annotate:element",
+    "interact:forms",
+    "interact:pointer",
+    "persist:artifact-state"
+  ],
+  "permissions": {
+    "network": []
+  }
+}
