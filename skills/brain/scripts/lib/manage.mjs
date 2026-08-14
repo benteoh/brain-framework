@@ -3,10 +3,12 @@ import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/pro
 import path from 'node:path'
 
 import {
+  LOCAL_STATE_PATH,
   MANAGED_FILES_PATH,
   MANIFEST_PATH,
   ensureDependencyIgnoreBlock,
   previewDependencyIgnoreBlock,
+  readLocalState,
   writeLocalState,
 } from './instance-state.mjs'
 import { createManifest, readFrameworkDescriptor, readManifest, writeManifest } from './manifest.mjs'
@@ -247,6 +249,111 @@ export async function addPlugin({ sourceRoot, targetRoot, name }) {
   await writeJson(path.join(targetRoot, MANAGED_FILES_PATH), metadata)
 
   return { status: 'installed', files }
+}
+
+export async function syncInstance({ sourceRoot, targetRoot }) {
+  targetRoot = path.resolve(targetRoot)
+
+  // A missing or invalid manifest fails with a repair instruction (readManifest already
+  // reports "Run brain init" for a missing file and a validation error otherwise).
+  const manifest = await readManifest(targetRoot)
+
+  let resolvedSourceRoot
+  if (sourceRoot) {
+    resolvedSourceRoot = path.resolve(sourceRoot)
+  } else {
+    let localState
+    try {
+      localState = await readLocalState(targetRoot)
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        throw new Error(
+          `Cannot resolve a framework source: no --source given and missing ${path.join(
+            targetRoot,
+            LOCAL_STATE_PATH,
+          )}. Run "brain sync --source PATH" or "brain init --source PATH" first.`,
+        )
+      }
+      throw error
+    }
+    resolvedSourceRoot = localState.sourceRoot
+  }
+
+  const descriptor = await readFrameworkDescriptor(resolvedSourceRoot)
+  if (
+    descriptor.repository !== manifest.framework.repository ||
+    descriptor.version !== manifest.framework.version
+  ) {
+    return {
+      status: 'conflict',
+      conflicts: [
+        `Source framework ${descriptor.repository}@${descriptor.version} does not match manifest requirement ${manifest.framework.repository}@${manifest.framework.version}`,
+      ],
+    }
+  }
+
+  const sourceFiles = await coreFiles(resolvedSourceRoot)
+  for (const plugin of manifest.plugins) {
+    sourceFiles.push(...(await pluginFiles(resolvedSourceRoot, plugin.name)))
+  }
+  sourceFiles.sort()
+
+  const managedFilesRaw = await readJsonIfExists(path.join(targetRoot, MANAGED_FILES_PATH))
+  const trackedFiles = managedFilesRaw?.files ?? {}
+  const ignored = new Set(managedFilesRaw?.ignoredFiles ?? [])
+
+  const filesToWrite = []
+  const conflicts = []
+
+  for (const relative of sourceFiles) {
+    if (ignored.has(relative)) continue
+    const destination = path.join(targetRoot, relative)
+    const destinationExists = await exists(destination)
+    const trackedChecksum = trackedFiles[relative]
+
+    if (relative === 'AGENTS.md' && destinationExists && !trackedChecksum) {
+      // Pre-existing, untracked AGENTS.md is personal content, exactly like `init`.
+      continue
+    }
+
+    if (trackedChecksum) {
+      if (!destinationExists) {
+        filesToWrite.push(relative)
+      } else if ((await sha256(destination)) !== trackedChecksum) {
+        conflicts.push(relative)
+      }
+    } else if (destinationExists) {
+      conflicts.push(relative)
+    } else {
+      filesToWrite.push(relative)
+    }
+  }
+
+  if (conflicts.length) return { status: 'conflict', conflicts: conflicts.sort() }
+
+  await copyManagedFiles(resolvedSourceRoot, targetRoot, filesToWrite)
+
+  const files = {}
+  for (const relative of sourceFiles) {
+    if (ignored.has(relative)) continue
+    if (relative === 'AGENTS.md' && !trackedFiles[relative] && !filesToWrite.includes(relative)) continue
+    files[relative] = await sha256(path.join(targetRoot, relative))
+  }
+
+  const metadata = {
+    schemaVersion: 1,
+    frameworkVersion: descriptor.version,
+    files,
+    ignoredFiles: managedFilesRaw?.ignoredFiles ?? [],
+    plugins: Object.fromEntries(manifest.plugins.map((plugin) => [plugin.name, { version: plugin.version }])),
+  }
+  await writeJson(path.join(targetRoot, MANAGED_FILES_PATH), metadata)
+  await writeLocalState(targetRoot, { sourceRoot: resolvedSourceRoot })
+
+  return {
+    status: managedFilesRaw ? (filesToWrite.length ? 'updated' : 'unchanged') : 'installed',
+    files: filesToWrite,
+  }
 }
 
 export async function getStatus({ sourceRoot, targetRoot }) {
