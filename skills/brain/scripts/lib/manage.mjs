@@ -2,8 +2,14 @@ import { createHash } from 'node:crypto'
 import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-const METADATA_PATH = path.join('.brain', 'managed-files.json')
-const CONFIG_PATH = path.join('.brain', 'config.json')
+import {
+  MANAGED_FILES_PATH,
+  MANIFEST_PATH,
+  ensureDependencyIgnoreBlock,
+  previewDependencyIgnoreBlock,
+  writeLocalState,
+} from './instance-state.mjs'
+import { createManifest, readFrameworkDescriptor, readManifest, writeManifest } from './manifest.mjs'
 
 function portable(relativePath) {
   return relativePath.split(path.sep).join('/')
@@ -53,8 +59,22 @@ async function pluginFiles(sourceRoot, name) {
   return (await walkFiles(pluginRoot)).map((relative) => `plugins/${name}/${relative}`)
 }
 
-async function readMetadata(targetRoot) {
-  return JSON.parse(await readFile(path.join(targetRoot, METADATA_PATH), 'utf8'))
+async function readJsonIfExists(file) {
+  try {
+    return JSON.parse(await readFile(file, 'utf8'))
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+}
+
+async function readManagedFiles(targetRoot) {
+  const file = path.join(targetRoot, MANAGED_FILES_PATH)
+  const value = await readJsonIfExists(file)
+  if (!value) {
+    throw new Error(`Missing installed dependency metadata: ${file}. Run "brain init" first.`)
+  }
+  return value
 }
 
 async function writeJson(file, value) {
@@ -81,11 +101,19 @@ export async function initInstance({ sourceRoot, targetRoot }) {
   targetRoot = path.resolve(targetRoot)
   await mkdir(targetRoot, { recursive: true })
 
-  if (await exists(path.join(targetRoot, METADATA_PATH))) {
+  const manifestExists = await exists(path.join(targetRoot, MANIFEST_PATH))
+  const managedFilesRaw = await readJsonIfExists(path.join(targetRoot, MANAGED_FILES_PATH))
+  const isMigratedMetadata = Boolean(managedFilesRaw) && managedFilesRaw.schemaVersion === 1
+  const legacyMetadata =
+    managedFilesRaw && !isMigratedMetadata && managedFilesRaw.version === 1 ? managedFilesRaw : null
+
+  if (manifestExists && isMigratedMetadata) {
     return updateInstance({ sourceRoot, targetRoot })
   }
 
+  const descriptor = await readFrameworkDescriptor(sourceRoot)
   const sourceFiles = await coreFiles(sourceRoot)
+  const legacyFiles = legacyMetadata?.files ?? {}
   const ignoredFiles = []
   const filesToInstall = []
   const conflicts = []
@@ -94,11 +122,19 @@ export async function initInstance({ sourceRoot, targetRoot }) {
     const destinationExists = await exists(path.join(targetRoot, relative))
     if (relative === 'AGENTS.md' && destinationExists) {
       ignoredFiles.push(relative)
+    } else if (legacyFiles[relative]) {
+      // Already installed and checksum-tracked by the legacy manager; carry it forward
+      // without reinstalling or discarding checksum ownership.
     } else if (destinationExists) {
       conflicts.push(relative)
     } else {
       filesToInstall.push(relative)
     }
+  }
+
+  const ignorePreview = await previewDependencyIgnoreBlock(targetRoot)
+  if (ignorePreview.status === 'conflict') {
+    conflicts.push(...ignorePreview.conflicts.map((rule) => `.gitignore:${rule}`))
   }
 
   if (conflicts.length) return { status: 'conflict', conflicts: conflicts.sort() }
@@ -107,20 +143,34 @@ export async function initInstance({ sourceRoot, targetRoot }) {
   const shouldSeedBrain = !(await exists(brainDestination))
   await copyManagedFiles(sourceRoot, targetRoot, filesToInstall)
   if (shouldSeedBrain) await copyFile(path.join(sourceRoot, 'Brain.md'), brainDestination)
+  await ensureDependencyIgnoreBlock(targetRoot)
+
+  let manifest
+  if (manifestExists) {
+    manifest = await readManifest(targetRoot)
+  } else {
+    manifest = createManifest(descriptor)
+    if (legacyMetadata?.plugins) {
+      manifest.plugins = Object.entries(legacyMetadata.plugins).map(([name, info]) => ({
+        name,
+        version: info.version,
+      }))
+    }
+    await writeManifest(targetRoot, manifest)
+  }
 
   const metadata = {
-    version: 1,
-    source: sourceRoot,
-    files: await checksums(targetRoot, filesToInstall),
+    schemaVersion: 1,
+    frameworkVersion: descriptor.version,
+    files: {
+      ...legacyFiles,
+      ...(await checksums(targetRoot, filesToInstall)),
+    },
     ignoredFiles,
-    plugins: {},
+    plugins: legacyMetadata?.plugins ?? {},
   }
-  await writeJson(path.join(targetRoot, CONFIG_PATH), {
-    version: 1,
-    source: sourceRoot,
-    enabledPlugins: [],
-  })
-  await writeJson(path.join(targetRoot, METADATA_PATH), metadata)
+  await writeJson(path.join(targetRoot, MANAGED_FILES_PATH), metadata)
+  await writeLocalState(targetRoot, { sourceRoot })
 
   return { status: 'installed', files: filesToInstall }
 }
@@ -128,7 +178,8 @@ export async function initInstance({ sourceRoot, targetRoot }) {
 export async function updateInstance({ sourceRoot, targetRoot }) {
   sourceRoot = path.resolve(sourceRoot)
   targetRoot = path.resolve(targetRoot)
-  const metadata = await readMetadata(targetRoot)
+  const metadata = await readManagedFiles(targetRoot)
+  const descriptor = await readFrameworkDescriptor(sourceRoot)
   const sourceFiles = await coreFiles(sourceRoot)
   for (const name of Object.keys(metadata.plugins ?? {}).sort()) {
     sourceFiles.push(...(await pluginFiles(sourceRoot, name)))
@@ -158,17 +209,14 @@ export async function updateInstance({ sourceRoot, targetRoot }) {
   if (conflicts.length) return { status: 'conflict', conflicts: conflicts.sort() }
 
   await copyManagedFiles(sourceRoot, targetRoot, filesToUpdate)
-  metadata.source = sourceRoot
+  metadata.schemaVersion = 1
+  metadata.frameworkVersion = descriptor.version
   metadata.files = {
     ...metadata.files,
     ...(await checksums(targetRoot, filesToUpdate)),
   }
-  await writeJson(path.join(targetRoot, CONFIG_PATH), {
-    version: 1,
-    source: sourceRoot,
-    enabledPlugins: Object.keys(metadata.plugins ?? {}).sort(),
-  })
-  await writeJson(path.join(targetRoot, METADATA_PATH), metadata)
+  await writeJson(path.join(targetRoot, MANAGED_FILES_PATH), metadata)
+  await writeLocalState(targetRoot, { sourceRoot })
 
   return { status: filesToUpdate.length ? 'updated' : 'unchanged', files: filesToUpdate }
 }
@@ -176,7 +224,7 @@ export async function updateInstance({ sourceRoot, targetRoot }) {
 export async function addPlugin({ sourceRoot, targetRoot, name }) {
   sourceRoot = path.resolve(sourceRoot)
   targetRoot = path.resolve(targetRoot)
-  const metadata = await readMetadata(targetRoot)
+  const metadata = await readManagedFiles(targetRoot)
   const files = await pluginFiles(sourceRoot, name)
 
   if (metadata.plugins?.[name]) {
@@ -196,12 +244,7 @@ export async function addPlugin({ sourceRoot, targetRoot, name }) {
   metadata.files = { ...metadata.files, ...(await checksums(targetRoot, files)) }
   metadata.plugins ??= {}
   metadata.plugins[name] = { version: manifest.version }
-  await writeJson(path.join(targetRoot, CONFIG_PATH), {
-    version: 1,
-    source: sourceRoot,
-    enabledPlugins: Object.keys(metadata.plugins).sort(),
-  })
-  await writeJson(path.join(targetRoot, METADATA_PATH), metadata)
+  await writeJson(path.join(targetRoot, MANAGED_FILES_PATH), metadata)
 
   return { status: 'installed', files }
 }
@@ -209,7 +252,7 @@ export async function addPlugin({ sourceRoot, targetRoot, name }) {
 export async function getStatus({ sourceRoot, targetRoot }) {
   sourceRoot = path.resolve(sourceRoot)
   targetRoot = path.resolve(targetRoot)
-  const metadata = await readMetadata(targetRoot)
+  const metadata = await readManagedFiles(targetRoot)
   const enabledPlugins = Object.keys(metadata.plugins ?? {}).sort()
   const provided = new Set()
   const manifests = new Map()
