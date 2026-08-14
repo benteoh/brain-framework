@@ -91,7 +91,7 @@ test('updates unchanged managed files and leaves personal files untouched', asyn
     '---\nname: learn\ndescription: Learn from evidence.\n---\n',
   )
 
-  const result = await updateInstance({ sourceRoot, targetRoot })
+  const result = await updateInstance({ sourceRoot, targetRoot, toVersion: DESCRIPTOR.version })
 
   assert.equal(result.status, 'updated')
   assert.match(
@@ -118,7 +118,7 @@ test('reports a local modification before writing any update', async () => {
     'upstream helper\n',
   )
 
-  const result = await updateInstance({ sourceRoot, targetRoot })
+  const result = await updateInstance({ sourceRoot, targetRoot, toVersion: DESCRIPTOR.version })
 
   assert.equal(result.status, 'conflict')
   assert.deepEqual(result.conflicts, ['skills/learn/SKILL.md', 'skills/learn/scripts/helper.mjs'])

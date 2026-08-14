@@ -11,7 +11,13 @@ import {
   readLocalState,
   writeLocalState,
 } from './instance-state.mjs'
-import { createManifest, readFrameworkDescriptor, readManifest, writeManifest } from './manifest.mjs'
+import {
+  createManifest,
+  isExactVersion,
+  readFrameworkDescriptor,
+  readManifest,
+  writeManifest,
+} from './manifest.mjs'
 
 function portable(relativePath) {
   return relativePath.split(path.sep).join('/')
@@ -103,6 +109,7 @@ export async function initInstance({ sourceRoot, targetRoot }) {
   targetRoot = path.resolve(targetRoot)
   await mkdir(targetRoot, { recursive: true })
 
+  const descriptor = await readFrameworkDescriptor(sourceRoot)
   const manifestExists = await exists(path.join(targetRoot, MANIFEST_PATH))
   const managedFilesRaw = await readJsonIfExists(path.join(targetRoot, MANAGED_FILES_PATH))
   const isMigratedMetadata = Boolean(managedFilesRaw) && managedFilesRaw.schemaVersion === 1
@@ -110,10 +117,9 @@ export async function initInstance({ sourceRoot, targetRoot }) {
     managedFilesRaw && !isMigratedMetadata && managedFilesRaw.version === 1 ? managedFilesRaw : null
 
   if (manifestExists && isMigratedMetadata) {
-    return updateInstance({ sourceRoot, targetRoot })
+    return updateInstance({ sourceRoot, targetRoot, toVersion: descriptor.version })
   }
 
-  const descriptor = await readFrameworkDescriptor(sourceRoot)
   const sourceFiles = await coreFiles(sourceRoot)
   const legacyFiles = legacyMetadata?.files ?? {}
   const ignoredFiles = []
@@ -177,11 +183,27 @@ export async function initInstance({ sourceRoot, targetRoot }) {
   return { status: 'installed', files: filesToInstall }
 }
 
-export async function updateInstance({ sourceRoot, targetRoot }) {
+export async function updateInstance({ sourceRoot, targetRoot, toVersion }) {
+  if (!toVersion) {
+    throw new Error(
+      'updateInstance requires an explicit --to VERSION; implicit "latest" updates are not supported',
+    )
+  }
+  if (!isExactVersion(toVersion)) {
+    throw new Error(`--to must be an exact release or commit, not a branch: ${toVersion}`)
+  }
+
   sourceRoot = path.resolve(sourceRoot)
   targetRoot = path.resolve(targetRoot)
-  const metadata = await readManagedFiles(targetRoot)
   const descriptor = await readFrameworkDescriptor(sourceRoot)
+  if (descriptor.version !== toVersion) {
+    throw new Error(
+      `--to ${toVersion} does not match the source framework descriptor version ${descriptor.version}`,
+    )
+  }
+
+  const manifest = await readManifest(targetRoot)
+  const metadata = await readManagedFiles(targetRoot)
   const sourceFiles = await coreFiles(sourceRoot)
   for (const name of Object.keys(metadata.plugins ?? {}).sort()) {
     sourceFiles.push(...(await pluginFiles(sourceRoot, name)))
@@ -217,8 +239,15 @@ export async function updateInstance({ sourceRoot, targetRoot }) {
     ...metadata.files,
     ...(await checksums(targetRoot, filesToUpdate)),
   }
+  // Ignored dependencies and local metadata change first; the tracked, Git-visible
+  // manifest is only ever replaced last, and atomically, once everything else succeeded.
   await writeJson(path.join(targetRoot, MANAGED_FILES_PATH), metadata)
   await writeLocalState(targetRoot, { sourceRoot })
+
+  await writeManifest(targetRoot, {
+    ...manifest,
+    framework: { ...manifest.framework, version: toVersion },
+  })
 
   return { status: filesToUpdate.length ? 'updated' : 'unchanged', files: filesToUpdate }
 }
@@ -227,11 +256,14 @@ export async function addPlugin({ sourceRoot, targetRoot, name }) {
   sourceRoot = path.resolve(sourceRoot)
   targetRoot = path.resolve(targetRoot)
   const metadata = await readManagedFiles(targetRoot)
-  const files = await pluginFiles(sourceRoot, name)
 
+  // Already declared: refuse to create a duplicate manifest entry. Re-running "plugin add"
+  // for an already-tracked plugin is a safe no-op, not an implicit framework/plugin update.
   if (metadata.plugins?.[name]) {
-    return updateInstance({ sourceRoot, targetRoot })
+    return { status: 'unchanged', files: [] }
   }
+
+  const files = await pluginFiles(sourceRoot, name)
 
   const conflicts = []
   for (const relative of files) {
@@ -239,14 +271,23 @@ export async function addPlugin({ sourceRoot, targetRoot, name }) {
   }
   if (conflicts.length) return { status: 'conflict', conflicts: conflicts.sort() }
 
-  const manifest = JSON.parse(
+  const pluginManifest = JSON.parse(
     await readFile(path.join(sourceRoot, 'plugins', name, 'brain-plugin.json'), 'utf8'),
   )
+
+  // Install code and update local checksums first...
   await copyManagedFiles(sourceRoot, targetRoot, files)
   metadata.files = { ...metadata.files, ...(await checksums(targetRoot, files)) }
   metadata.plugins ??= {}
-  metadata.plugins[name] = { version: manifest.version }
+  metadata.plugins[name] = { version: pluginManifest.version }
   await writeJson(path.join(targetRoot, MANAGED_FILES_PATH), metadata)
+
+  // ...then atomically replace the tracked, Git-visible manifest last.
+  const manifest = await readManifest(targetRoot)
+  await writeManifest(targetRoot, {
+    ...manifest,
+    plugins: [...manifest.plugins, { name, version: pluginManifest.version }],
+  })
 
   return { status: 'installed', files }
 }
