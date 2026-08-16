@@ -12,6 +12,19 @@ async function temporaryFramework() {
     writeFile(path.join(root, 'README.md'), '# Brain\n'),
     writeFile(path.join(root, 'AGENTS.md'), '# Agent contract\n'),
     writeFile(path.join(root, 'Brain.md'), '# Brain\n'),
+    writeFile(
+      path.join(root, 'brain-framework.json'),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          name: 'brain-framework',
+          repository: 'https://github.com/benteoh/brain-framework',
+          version: '0.1.0-alpha.1',
+        },
+        null,
+        2,
+      )}\n`,
+    ),
   ])
   await addSkill(root, 'learn')
   return root
@@ -139,6 +152,68 @@ test('reports duplicate user-owned data roots across plugins', async () => {
     result.errors.includes(
       'Data root "Learning/Chess" is declared by both "chess" and "tactics"',
     ),
+  )
+})
+
+test('reports a missing framework descriptor', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'brain-validate-'))
+  await Promise.all([
+    writeFile(path.join(root, 'README.md'), '# Brain\n'),
+    writeFile(path.join(root, 'AGENTS.md'), '# Agent contract\n'),
+    writeFile(path.join(root, 'Brain.md'), '# Brain\n'),
+  ])
+  await addSkill(root, 'learn')
+
+  const result = await validateFramework(root)
+
+  assert.ok(result.errors.includes('Missing required root file: brain-framework.json'))
+})
+
+test('reports a branch-like framework descriptor version', async () => {
+  const root = await temporaryFramework()
+  await writeFile(
+    path.join(root, 'brain-framework.json'),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        name: 'brain-framework',
+        repository: 'https://github.com/benteoh/brain-framework',
+        version: 'main',
+      },
+      null,
+      2,
+    )}\n`,
+  )
+
+  const result = await validateFramework(root)
+
+  assert.ok(
+    result.errors.includes(
+      'brain-framework.json version must be an exact release or commit, not a branch',
+    ),
+  )
+})
+
+test('reports a branch-like plugin version', async () => {
+  const root = await temporaryFramework()
+  await addPlugin(
+    root,
+    'studio',
+    {
+      name: 'studio',
+      version: 'latest',
+      brain: '>=0.1.0 <0.2.0',
+      description: 'Render interactive artifacts.',
+      dataRoot: 'Artifacts',
+      skills: ['studio'],
+    },
+    ['studio'],
+  )
+
+  const result = await validateFramework(root)
+
+  assert.ok(
+    result.errors.includes('Plugin "studio" version must be an exact release or commit, not a branch'),
   )
 })
 

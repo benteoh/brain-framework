@@ -29,6 +29,13 @@ Work through this loop when it serves the user's goal:
 - Never silently overwrite user-owned or locally modified files.
 - Keep secrets and machine-specific credentials out of committed knowledge.
 
+## Dependency model
+
+- A private Brain instance tracks `.brain/manifest.json` (portable: framework repository, exact version, enabled plugins) in Git. It ignores installed dependencies: `/skills/`, `/plugins/`, `.brain/local.json`, and `.brain/managed-files.json`.
+- After a fresh clone, or whenever installed dependencies look missing, run `brain sync --target PATH` to restore them from the tracked manifest and a resolved local framework checkout. Do not hand-copy skills or plugin files to "fix" a clone.
+- Durable changes to shared behaviour belong in this framework's (or a plugin's) source, not in an installed copy inside a private Brain. Reinstall with `sync` or `update` after making the change upstream.
+- `brain update --to VERSION` only ever moves to an explicit, exact release or commit that matches the source framework's own descriptor version — never an implicit "latest" or a moving branch.
+
 ## Portability
 
 - Use `[[wikilinks]]` for internal note references when editing an Obsidian vault.

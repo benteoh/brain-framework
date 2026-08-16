@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
-import { addPlugin, getStatus, initInstance, updateInstance } from './lib/manage.mjs'
+import { addPlugin, getStatus, initInstance, syncInstance, updateInstance } from './lib/manage.mjs'
 import { validateFramework } from './lib/validate.mjs'
 
 const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
@@ -13,7 +13,8 @@ function usage() {
   return `Usage:
   brain.mjs validate [--root PATH]
   brain.mjs init --target PATH [--source PATH]
-  brain.mjs update --target PATH [--source PATH]
+  brain.mjs sync --target PATH [--source PATH]
+  brain.mjs update --to VERSION --target PATH [--source PATH]
   brain.mjs status --target PATH [--source PATH]
   brain.mjs plugin add NAME --target PATH [--source PATH]`
 }
@@ -26,6 +27,7 @@ async function main(argv) {
       root: { type: 'string' },
       source: { type: 'string' },
       target: { type: 'string' },
+      to: { type: 'string' },
     },
     allowPositionals: true,
   })
@@ -43,11 +45,42 @@ async function main(argv) {
     return
   }
 
-  if (command === 'init' || command === 'update') {
+  if (command === 'init') {
     if (!values.target) throw new Error(`--target is required\n${usage()}`)
-    const operation = command === 'init' ? initInstance : updateInstance
-    const result = await operation({
+    const result = await initInstance({
       sourceRoot: path.resolve(values.source ?? sourceRoot),
+      targetRoot: path.resolve(values.target),
+    })
+    if (result.status === 'conflict') {
+      console.error(`Managed-file conflict:\n${result.conflicts.map((file) => `- ${file}`).join('\n')}`)
+      process.exitCode = 2
+      return
+    }
+    console.log(`${result.status}: ${result.files.length} managed files`)
+    return
+  }
+
+  if (command === 'update') {
+    if (!values.target) throw new Error(`--target is required\n${usage()}`)
+    if (!values.to) throw new Error(`--to VERSION is required\n${usage()}`)
+    const result = await updateInstance({
+      sourceRoot: path.resolve(values.source ?? sourceRoot),
+      targetRoot: path.resolve(values.target),
+      toVersion: values.to,
+    })
+    if (result.status === 'conflict') {
+      console.error(`Managed-file conflict:\n${result.conflicts.map((file) => `- ${file}`).join('\n')}`)
+      process.exitCode = 2
+      return
+    }
+    console.log(`${result.status}: ${result.files.length} managed files`)
+    return
+  }
+
+  if (command === 'sync') {
+    if (!values.target) throw new Error(`--target is required\n${usage()}`)
+    const result = await syncInstance({
+      sourceRoot: values.source ? path.resolve(values.source) : undefined,
       targetRoot: path.resolve(values.target),
     })
     if (result.status === 'conflict') {

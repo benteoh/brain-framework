@@ -1,6 +1,8 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 
+import { isExactVersion, validateFrameworkDescriptor } from './manifest.mjs'
+
 const REQUIRED_ROOT_FILES = ['README.md', 'AGENTS.md', 'Brain.md']
 const REQUIRED_PLUGIN_FIELDS = [
   'name',
@@ -87,6 +89,9 @@ async function validatePlugin(root, folder, capabilities, dataRoots, errors) {
   if (manifest.name && manifest.name !== folder) {
     errors.push(`Plugin folder "${folder}" must match manifest name "${manifest.name}"`)
   }
+  if (manifest.version !== undefined && !isExactVersion(manifest.version)) {
+    errors.push(`Plugin "${folder}" version must be an exact release or commit, not a branch`)
+  }
 
   if (typeof manifest.dataRoot === 'string' && manifest.dataRoot) {
     const previous = dataRoots.get(manifest.dataRoot)
@@ -121,9 +126,36 @@ async function validatePlugin(root, folder, capabilities, dataRoots, errors) {
   }
 }
 
+async function validateDescriptorFile(root, errors) {
+  const file = path.join(root, 'brain-framework.json')
+  let raw
+  try {
+    raw = await readFile(file, 'utf8')
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      errors.push('Missing required root file: brain-framework.json')
+      return
+    }
+    throw error
+  }
+
+  let value
+  try {
+    value = JSON.parse(raw)
+  } catch (error) {
+    errors.push(`Invalid brain-framework.json: ${error.message}`)
+    return
+  }
+
+  const { errors: descriptorErrors } = validateFrameworkDescriptor(value)
+  errors.push(...descriptorErrors)
+}
+
 export async function validateFramework(root) {
   const errors = []
   const warnings = []
+
+  await validateDescriptorFile(root, errors)
 
   for (const relativeFile of REQUIRED_ROOT_FILES) {
     const file = path.join(root, relativeFile)
