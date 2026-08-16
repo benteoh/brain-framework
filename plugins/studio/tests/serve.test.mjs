@@ -6,13 +6,19 @@ import test from 'node:test'
 
 import { createStudioServer } from '../scripts/serve.mjs'
 
-async function withServer(t) {
+async function withServer(t, { data } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'studio-serve-'))
   const htmlPath = path.join(dir, 'exercise.html')
   const transcriptPath = path.join(dir, 'transcript.jsonl')
+  const dataPath = path.join(dir, 'data.json')
   await writeFile(htmlPath, '<p>ciao</p>')
+  if (data !== undefined) await writeFile(dataPath, JSON.stringify(data))
 
-  const server = createStudioServer({ htmlPath, transcriptPath })
+  const server = createStudioServer({
+    htmlPath,
+    transcriptPath,
+    dataPath: data !== undefined ? dataPath : undefined,
+  })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   t.after(() => {
     // An open SSE connection is a live keep-alive socket; server.close() only
@@ -22,7 +28,7 @@ async function withServer(t) {
     return new Promise((resolve) => server.close(resolve))
   })
   const { port } = server.address()
-  return { base: `http://127.0.0.1:${port}`, transcriptPath }
+  return { base: `http://127.0.0.1:${port}`, transcriptPath, dataPath }
 }
 
 async function readSseEntries(base, count) {
@@ -136,8 +142,10 @@ test('messages appear over /events as they are recorded, in order, to every conn
 
   const entries = await entriesPromise
   assert.equal(entries.length, 2)
+  assert.equal(entries[0].kind, 'chat')
   assert.equal(entries[0].role, 'learner')
   assert.equal(entries[0].text, 'Buongiorno')
+  assert.equal(entries[1].kind, 'chat')
   assert.equal(entries[1].role, 'agent')
   assert.equal(entries[1].text, 'Ciao!')
 })
@@ -146,4 +154,87 @@ test('unknown routes 404', async (t) => {
   const { base } = await withServer(t)
   const response = await fetch(`${base}/nope`)
   assert.equal(response.status, 404)
+})
+
+test('GET /data returns 404 when no --data file was configured', async (t) => {
+  const { base } = await withServer(t)
+  const response = await fetch(`${base}/data`)
+  assert.equal(response.status, 404)
+})
+
+test('GET /data returns the current parsed JSON content of the data file', async (t) => {
+  const { base } = await withServer(t, { data: { title: 'Al Bar', hints: ['e = and'] } })
+  const response = await fetch(`${base}/data`)
+  assert.equal(response.status, 200)
+  assert.match(response.headers.get('content-type'), /application\/json/)
+  assert.deepEqual(await response.json(), { title: 'Al Bar', hints: ['e = and'] })
+})
+
+test('GET /data reflects an in-place edit to the data file, re-read fresh each request', async (t) => {
+  const { base, dataPath } = await withServer(t, { data: { title: 'Original' } })
+  assert.deepEqual(await (await fetch(`${base}/data`)).json(), { title: 'Original' })
+
+  await writeFile(dataPath, JSON.stringify({ title: 'Updated' }))
+  assert.deepEqual(await (await fetch(`${base}/data`)).json(), { title: 'Updated' })
+})
+
+test('GET /state starts empty', async (t) => {
+  const { base } = await withServer(t)
+  const response = await fetch(`${base}/state`)
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), {})
+})
+
+test('POST /update replaces the in-memory state, reflected by GET /state', async (t) => {
+  const { base } = await withServer(t)
+  const response = await fetch(`${base}/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' } }),
+  })
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { ok: true })
+
+  const state = await (await fetch(`${base}/state`)).json()
+  assert.deepEqual(state, { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' })
+})
+
+test('POST /update broadcasts a {kind: "state", data, at} event over /events', async (t) => {
+  const { base } = await withServer(t)
+
+  const entriesPromise = readSseEntries(base, 1)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  await fetch(`${base}/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: { fen: '8/8/8/8/8/8/8/8 w - - 0 1' } }),
+  })
+
+  const [entry] = await entriesPromise
+  assert.equal(entry.kind, 'state')
+  assert.deepEqual(entry.data, { fen: '8/8/8/8/8/8/8/8 w - - 0 1' })
+  assert.match(entry.at, /^\d{4}-\d{2}-\d{2}T/)
+})
+
+test('POST /update rejects a non-object data field without touching state', async (t) => {
+  const { base } = await withServer(t)
+  const response = await fetch(`${base}/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: 'not-an-object' }),
+  })
+  assert.equal(response.status, 400)
+  assert.deepEqual(await (await fetch(`${base}/state`)).json(), {})
+})
+
+test('GET /transcript keeps its original {role, text, at} shape, with no kind field', async (t) => {
+  const { base } = await withServer(t)
+  await fetch(`${base}/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: 'Buongiorno' }),
+  })
+  const transcript = await (await fetch(`${base}/transcript`)).json()
+  assert.equal(transcript.length, 1)
+  assert.deepEqual(Object.keys(transcript[0]).sort(), ['at', 'role', 'text'])
 })
