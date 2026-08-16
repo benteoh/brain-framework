@@ -1976,7 +1976,11 @@ const Chess = function (fen) {
           const marker = document.createElementNS(svgNs, 'circle');
           marker.setAttribute('cx', x + SIZE / 2);
           marker.setAttribute('cy', y + SIZE / 2);
-          const isCapture = !!piece;
+          // A destination is a capture if it's occupied (the common case) OR
+          // any queued move to it captures without occupying it (en passant:
+          // the captured pawn sits beside the destination, not on it, so the
+          // pre-move board lookup alone would miss it).
+          const isCapture = !!piece || legalDestinations.get(square).some(function (m) { return !!m.captured; });
           marker.setAttribute('r', isCapture ? SIZE * 0.42 : SIZE * 0.16);
           marker.setAttribute('fill', isCapture ? 'none' : 'var(--sq-legal)');
           marker.setAttribute('stroke', isCapture ? 'var(--sq-legal-capture)' : 'none');
