@@ -17,16 +17,20 @@ area. Self-contained — no CDN scripts, inline any needed CSS/JS.
 - **Test mode**: prompt to response to feedback. No hints. Scored. Writes one evidence record
   per attempt.
 
-## Interaction loop (v0)
+## Interaction loop
 
-1. Agent composes the HTML for the current prompt/exercise and publishes it via `Artifact`.
-2. Learner works it in the browser.
-3. Learner reports the result in chat (what they answered, what they picked). Turn-based, no
-   extra plumbing.
-4. Agent gives feedback and revises the same artifact in place for the next prompt, rather than
-   publishing a new page per turn.
+1. Agent composes the HTML for the current prompt/exercise, including a conversation panel
+   (hydrates from `GET /transcript`, appends messages received over `EventSource('/events')`,
+   and a `POST /submit` input) — see the `studio` skill for the exact contract.
+2. Agent starts `plugins/studio/scripts/serve.mjs` for that file and opens the served
+   `http://127.0.0.1:<port>/` URL with `open.mjs`.
+3. Learner works the exercise and replies from inside the page itself — no chat needed for the
+   substance.
+4. Agent watches the transcript file for new learner messages and replies with
+   `plugins/studio/scripts/say.mjs`, which appears live on the page over SSE, rather than
+   waiting for the learner to transcribe results in chat.
 5. At session end, agent distills the session to Markdown: vocabulary entries, evidence records,
-   progress updates.
+   progress updates; then stops the server.
 
 ## Correctness has no oracle here
 
@@ -36,10 +40,9 @@ learner's verbatim response as the deterministic fact, and the agent's assessmen
 stated reasoning when it's a judgment call rather than an exact match) as a separate, clearly
 labeled field.
 
-## Upgrade path (deferred)
+## Still deferred: v2 reusable shell templates
 
-v1, only once v0's UX is validated: use the `artifact-capabilities` live-state runtime so the
-artifact records answers itself and the agent reads them back next turn instead of the learner
-transcribing results in chat. This requires loading the `artifact-capabilities` skill and
-declaring capabilities before publishing — deliberately out of scope until the exercise format
-above is validated in real sessions.
+The interaction loop above is real and live; what's still hand-composed per session is the HTML
+itself. See `docs/superpowers/specs/2026-08-15-studio-language-coach-design.md` in the private
+vault, "Deferred: v2 reusable shell templates," for the plan to replace that with a fixed
+template plus a small declarative data payload.

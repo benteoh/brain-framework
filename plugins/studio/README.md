@@ -20,4 +20,6 @@ An implementation may use a webview, local web server, editor extension, MCP-com
 
 Every important conclusion, annotation, or learner-state change must be representable in ordinary files. Interactive UI state may enhance a note but must not become the only copy of durable knowledge.
 
-This bootstrap defines the capability contract only; it does not yet ship a renderer runtime.
+## Local runtime
+
+`skills/studio/SKILL.md` documents Studio's first renderer: `scripts/open.mjs`, `scripts/serve.mjs`, and `scripts/say.mjs` — a local-only, dependency-free HTTP server and browser launcher. It renders one HTML artifact, carries a live conversation over Server-Sent Events, and never leaves the machine. Other adapters (a webview, an editor extension, an MCP-compatible app surface) can implement the same capability contract without being required by it.
