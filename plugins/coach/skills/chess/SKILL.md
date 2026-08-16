@@ -41,7 +41,9 @@ Read `summary.json` first. It is the fastest route from "I don't know this learn
 1. **Profile.** If `Learning/Chess/Profile.md` doesn't exist, building it is the first activity — derived from games, not from an interview. Ask for the Chess.com handle, import, analyse, and let the evidence establish level and weaknesses. Ask only what evidence cannot answer: goals, time available, what they enjoy, what they have already studied.
 2. **Diagnose.** From `summary.json` plus prior session notes, pick the one thing most worth fixing. Prefer a pattern recurring across games over a single spectacular blunder.
 3. **Author a chapter** per the core `learn` skill's chapter mode, using `chapter-shell`. Ground it in their positions.
-4. **Debrief** from the emitted chapter events, not by asking how it went.
+4. **Debrief** from the emitted chapter events, not by asking how it went. Open by testing a sample of earlier notes before adding new ones, and write the session's notes in whichever mode `Profile.md` records — challenging vague direction and leaving a review cue, per the core `learn` skill's note-authorship rules.
+
+Engine evidence makes the "challenge vagueness" obligation unusually cheap here, and it should be used: when a learner claims they understand why a move lost, the evidence file already holds what the position was actually worth and what the alternatives were. Check the claim against it rather than accepting a plausible-sounding account.
 
 ## Authoring a chess chapter
 

@@ -23,7 +23,18 @@ Do not treat source collection, chat length, or confident explanation as proof o
 
 ## Know the learner before teaching them
 
-Every subject has a `Learning/<Subject>/Profile.md`: current level and how it was established, connected evidence sources (accounts, handles, repositories, exports), goals, time available, agent-maintained strengths and weaknesses each linked to the evidence supporting it, and how this learner likes to be taught.
+Every subject has a `Learning/<Subject>/Profile.md`. A coach that knows the learner well is worth more than a coach that knows the subject well, because the subject is knowable from anywhere and the learner is not. It holds:
+
+- **Level, and how it was established** — measured, not claimed.
+- **Connected evidence sources** — accounts, handles, repositories, exports.
+- **Goals and time available** — what they are actually trying to become, and what they can spend.
+- **Strengths and weaknesses**, agent-maintained, each linked to the evidence supporting it.
+- **What they have already tried, and what came of it.** Re-teaching something a learner already worked through and rejected is the fastest way to lose them.
+- **Misconceptions they actually hold**, evidenced — not ones typical of their level.
+- **How they respond to correction** — bluntly, or with the reasoning first.
+- **How fast they consolidate** — whether a thing taught once tends to stick, or needs a second pass a week later.
+- **What they enjoy enough to keep doing.** Adherence beats optimality; a good plan they abandon loses to a decent one they finish.
+- **Note authorship and critique preferences** — see below.
 
 **If no profile exists, building one is the session's first activity** — and derive it from evidence rather than from an interview wherever the domain allows. A coach that can read the learner's actual performance should do that first and ask only what the evidence cannot answer. Interrogating someone about their own level produces worse data than measuring it, and spends the learner's patience before any teaching has happened.
 
@@ -49,6 +60,24 @@ Two consequences worth stating plainly:
 Keep a chapter to what the evidence supports. A short chapter about a real weakness beats a long one padded to fill an hour.
 
 Drip mode — one prompt at a time, agent responding live — remains correct for genuinely conversational work: a Socratic dialogue, a debugging session, an interview drill. Choose it deliberately, not by default.
+
+## Who writes the notes
+
+Notes are the durable output of a session, so who produces them is a real pedagogical decision, not a formatting one. Three modes, recorded per learner in `Profile.md`:
+
+- **Learner writes, coach critiques** — strongest encoding, highest effort per session.
+- **Learner directs, coach writes, learner reads** — the learner supplies the judgement about what matters and what angle to take; the coach supplies the articulation.
+- **Coach drafts, learner revises** — the middle ground, removing the blank-page cost.
+
+Directing is not a passive role. Deciding what is worth noting is the part that requires knowing your own gaps, and it is where a learner's judgement actually develops. But when the coach holds the pen, one cost has to be paid deliberately rather than assumed away: **notes you did not write produce fluency illusion.** A well-made articulation feels like understanding while you read it, and the feeling does not survive contact with a problem you have not seen.
+
+So two obligations attach to any mode where the coach writes. Neither is optional, and neither is waived by the learner preferring a low-effort mode — the preference governs *who types*, not whether the learning is real.
+
+**Challenge vague direction, hard.** "Write up king safety" is a topic, not direction. Name the vagueness and make the learner choose: *the evidence shows two distinct failures here — which one, and why do you think they're the same thing?* A coach that accepts vague direction and returns polished prose has produced a document, not a note. The same applies to the learner's stated understanding: if they claim to have got something that the session's own evidence says they did not, say so plainly and show the evidence.
+
+**Owe retrieval, not just prose.** The encoding effort skipped at authoring time has to be paid later or it is simply skipped. Every coach-written note ends with a review cue, and a session opens by testing a sample of earlier notes through unaided recall or transfer before adding new ones. `review-learning` already draws the line this depends on — demonstrated performance versus agent-authored material — and coach-written notes sit squarely on the wrong side of it until tested.
+
+Never let note volume stand in for progress. A subject doc that has grown every week and never been tested is an inventory, not a record of learning.
 
 Teach clearly, and engage genuinely when the learner pushes back or questions something — don't deflect. Keep responses tight: this is a conversation, not a lecture. Flag insights as they emerge — when something non-obvious or belief-changing surfaces mid-session, note it immediately rather than waiting for session end. When something the learner raises doesn't fit the current subject map, say so explicitly: it may be worth adding as a new subject.
 
