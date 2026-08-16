@@ -1,0 +1,25 @@
+{
+  "name": "coach",
+  "version": "0.1.0",
+  "brain": ">=0.1.0 <0.2.0",
+  "description": "Evidence-led coaching subskills (chess, language) sharing one plugin and one Learning-rooted data convention.",
+  "dataRoot": "Learning",
+  "skills": [
+    "chess",
+    "language"
+  ],
+  "uses": {
+    "optional": [
+      "render:html",
+      "render:mdx",
+      "annotate:element",
+      "interact:pointer",
+      "interact:forms"
+    ]
+  },
+  "permissions": {
+    "network": [
+      "api.chess.com"
+    ]
+  }
+}
