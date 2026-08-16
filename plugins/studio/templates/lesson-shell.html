@@ -77,6 +77,28 @@
     font-size: 0.92rem;
   }
   .exercise .label { color: var(--chip-fg); font-weight: 600; margin-right: 0.35rem; }
+  .exercise-form { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
+  .exercise-form input {
+    flex: 1;
+    padding: 0.45rem 0.6rem;
+    border-radius: 0.4rem;
+    border: 1px solid var(--chip-border);
+    background: var(--surface);
+    color: var(--fg);
+    font-size: 0.9rem;
+  }
+  .exercise-form button {
+    padding: 0.45rem 0.85rem;
+    border-radius: 0.4rem;
+    border: none;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .exercise-form button:hover { filter: brightness(1.05); }
+  .exercise-sent { margin-top: 0.4rem; font-size: 0.8rem; color: var(--muted); }
   .chat-panel { display: flex; flex-direction: column; height: 100%; min-height: 22rem; }
   .chat-heading { margin: 0 0 0.75rem; font-size: 1rem; font-weight: 600; }
   .chat-log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; padding-right: 0.25rem; min-height: 14rem; max-height: 28rem; }
@@ -115,6 +137,35 @@
 
   function escapeText(node, text) {
     node.textContent = text == null ? '' : String(text);
+  }
+
+  // Minimal, injection-safe markdown: **bold** and _italic_ become real
+  // elements via textContent, everything else is a plain text node — no
+  // HTML is ever parsed from data, so untrusted content stays inert.
+  function appendInline(el, text) {
+    const raw = text == null ? '' : String(text);
+    const pattern = /\*\*(.+?)\*\*|_(.+?)_/g;
+    let lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(raw)) !== null) {
+      if (match.index > lastIndex) {
+        el.appendChild(document.createTextNode(raw.slice(lastIndex, match.index)));
+      }
+      const strong = match[1];
+      if (strong !== undefined) {
+        const node = document.createElement('strong');
+        node.textContent = strong;
+        el.appendChild(node);
+      } else {
+        const node = document.createElement('em');
+        node.textContent = match[2];
+        el.appendChild(node);
+      }
+      lastIndex = pattern.lastIndex;
+    }
+    if (lastIndex < raw.length) {
+      el.appendChild(document.createTextNode(raw.slice(lastIndex)));
+    }
   }
 
   // --- Conversation panel: hydrate /transcript, subscribe /events, submit ---
@@ -182,18 +233,23 @@
     };
   }
 
-  chatForm.addEventListener('submit', function (event) {
-    event.preventDefault();
-    const text = chatInput.value.trim();
-    if (!text) return;
-    chatInput.value = '';
+  function submitText(text) {
+    const trimmed = (text || '').trim();
+    if (!trimmed) return;
     fetch('/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text }),
+      body: JSON.stringify({ text: trimmed }),
     }).catch(function (err) {
       console.error('Could not submit', err);
     });
+  }
+
+  chatForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    const text = chatInput.value;
+    chatInput.value = '';
+    submitText(text);
   });
 
   // --- Shell-specific: fetch /data, render, react to live state pushes ---
@@ -228,7 +284,7 @@
       paragraphs.forEach(function (para) {
         if (!para.trim()) return;
         const p = document.createElement('p');
-        escapeText(p, para.trim());
+        appendInline(p, para.trim());
         body.appendChild(p);
       });
       wrap.appendChild(body);
@@ -240,9 +296,29 @@
         label.className = 'label';
         label.textContent = 'Try it:';
         const text = document.createElement('span');
-        escapeText(text, section.exercisePrompt);
+        appendInline(text, section.exercisePrompt);
         exercise.appendChild(label);
         exercise.appendChild(text);
+
+        const form = document.createElement('form');
+        form.className = 'exercise-form';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'Your answer…';
+        input.autocomplete = 'off';
+        const button = document.createElement('button');
+        button.type = 'submit';
+        button.textContent = 'Send';
+        form.appendChild(input);
+        form.appendChild(button);
+        form.addEventListener('submit', function (event) {
+          event.preventDefault();
+          const value = input.value;
+          input.value = '';
+          submitText(value);
+        });
+        exercise.appendChild(form);
+
         wrap.appendChild(exercise);
       }
 

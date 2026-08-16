@@ -125,6 +125,35 @@
     node.textContent = text == null ? '' : String(text);
   }
 
+  // Minimal, injection-safe markdown: **bold** and _italic_ become real
+  // elements via textContent, everything else is a plain text node — no
+  // HTML is ever parsed from data, so untrusted content stays inert.
+  function appendInline(el, text) {
+    const raw = text == null ? '' : String(text);
+    const pattern = /\*\*(.+?)\*\*|_(.+?)_/g;
+    let lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(raw)) !== null) {
+      if (match.index > lastIndex) {
+        el.appendChild(document.createTextNode(raw.slice(lastIndex, match.index)));
+      }
+      const strong = match[1];
+      if (strong !== undefined) {
+        const node = document.createElement('strong');
+        node.textContent = strong;
+        el.appendChild(node);
+      } else {
+        const node = document.createElement('em');
+        node.textContent = match[2];
+        el.appendChild(node);
+      }
+      lastIndex = pattern.lastIndex;
+    }
+    if (lastIndex < raw.length) {
+      el.appendChild(document.createTextNode(raw.slice(lastIndex)));
+    }
+  }
+
   // --- Conversation panel: hydrate /transcript, subscribe /events, submit ---
   const chatLog = document.getElementById('chat-log');
   const chatForm = document.getElementById('chat-form');
@@ -215,8 +244,10 @@
   function render() {
     document.title = 'Studio — ' + (current.title || 'Quiz');
     escapeText(titleEl, current.title || 'Quiz');
-    escapeText(contextEl, current.context || '');
-    escapeText(promptEl, current.prompt || '');
+    contextEl.textContent = '';
+    appendInline(contextEl, current.context || '');
+    promptEl.textContent = '';
+    appendInline(promptEl, current.prompt || '');
     hintsEl.innerHTML = '';
     const hints = Array.isArray(current.hints) ? current.hints : [];
     hints.forEach(function (hint, index) {
@@ -231,7 +262,7 @@
         }
         const reveal = document.createElement('div');
         reveal.className = 'hint-reveal';
-        escapeText(reveal, hint);
+        appendInline(reveal, hint);
         chip.insertAdjacentElement('afterend', reveal);
       });
       hintsEl.appendChild(chip);
