@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Studio — Progress</title>
+<style>
+  /*
+   * progress-shell: a simple linear CSS visual of skill-tree stages with
+   * confidence/status — no graph library. Data shape:
+   *   {title, nodes: [{name, confidence, status}]}
+   * Clicking a node submits {text: "let's work on <node>"}. This CSS/JS
+   * block is intentionally duplicated across all four shells so each stays
+   * independently self-contained (see plugins/studio/skills/studio/SKILL.md).
+   */
+  :root {
+    --bg: #f6f6f4;
+    --surface: #ffffff;
+    --border: #e2e2de;
+    --fg: #1b1b18;
+    --muted: #66665f;
+    --accent: #0f766e;
+    --accent-fg: #ffffff;
+    --chip-bg: #eef2f0;
+    --chip-fg: #0f766e;
+    --chip-border: #cfe3de;
+    --danger: #b3261e;
+    --live-ok: #1f9d55;
+    --live-bad: #b3261e;
+    --status-done: #1f9d55;
+    --status-progress: #b98a12;
+    --status-todo: #8a8a83;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16171a;
+      --surface: #1e2024;
+      --border: #33353a;
+      --fg: #ececea;
+      --muted: #a3a39c;
+      --accent: #4fd1c5;
+      --accent-fg: #0b1f1c;
+      --chip-bg: #223330;
+      --chip-fg: #7ee8db;
+      --chip-border: #2f4a44;
+      --danger: #ff6b60;
+      --live-ok: #3ddc84;
+      --live-bad: #ff6b60;
+      --status-done: #3ddc84;
+      --status-progress: #e0b23a;
+      --status-todo: #8a8a86;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+  }
+  .page { max-width: 1080px; margin: 0 auto; padding: 1.5rem; }
+  header.top { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+  h1 { font-size: 1.4rem; margin: 0; }
+  .live { font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+  .live-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .live-dot.ok { background: var(--live-ok); }
+  .live-dot.bad { background: var(--live-bad); }
+  .layout { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1.25rem; align-items: start; }
+  @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.1rem 1.25rem; }
+  .tree { list-style: none; margin: 0; padding: 0; position: relative; }
+  .tree::before {
+    content: '';
+    position: absolute;
+    left: 0.55rem;
+    top: 0.6rem;
+    bottom: 0.6rem;
+    width: 2px;
+    background: var(--border);
+  }
+  .tree li { position: relative; margin-bottom: 0.6rem; }
+  .tree li:last-child { margin-bottom: 0; }
+  .node-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    text-align: left;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    padding: 0.6rem 0.85rem 0.6rem 2rem;
+    cursor: pointer;
+    color: var(--fg);
+    font: inherit;
+    position: relative;
+  }
+  .node-btn:hover { border-color: var(--accent); }
+  .node-dot {
+    position: absolute;
+    left: -1.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 50%;
+    border: 2px solid var(--surface);
+    outline: 2px solid var(--status-todo);
+  }
+  .node-btn[data-status-class="done"] .node-dot { outline-color: var(--status-done); background: var(--status-done); }
+  .node-btn[data-status-class="progress"] .node-dot { outline-color: var(--status-progress); background: var(--status-progress); }
+  .node-btn[data-status-class="todo"] .node-dot { outline-color: var(--status-todo); background: transparent; }
+  .node-body { display: flex; flex-direction: column; gap: 0.15rem; flex: 1; min-width: 0; }
+  .node-name { font-weight: 600; }
+  .node-meta { display: flex; align-items: center; gap: 0.6rem; font-size: 0.82rem; color: var(--muted); }
+  .confidence-meter { letter-spacing: 0.1em; }
+  .status-badge {
+    display: inline-block;
+    padding: 0.1rem 0.55rem;
+    border-radius: 999px;
+    background: var(--chip-bg);
+    color: var(--chip-fg);
+    font-size: 0.75rem;
+    text-transform: capitalize;
+  }
+  .chat-panel { display: flex; flex-direction: column; height: 100%; min-height: 22rem; }
+  .chat-heading { margin: 0 0 0.75rem; font-size: 1rem; font-weight: 600; }
+  .chat-log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; padding-right: 0.25rem; min-height: 14rem; max-height: 28rem; }
+  .chat-entry { padding: 0.5rem 0.7rem; border-radius: 0.6rem; font-size: 0.92rem; max-width: 92%; }
+  .chat-entry.chat-learner { align-self: flex-end; background: var(--accent); color: var(--accent-fg); }
+  .chat-entry.chat-agent { align-self: flex-start; background: var(--chip-bg); color: var(--fg); }
+  .chat-role { display: block; font-size: 0.7rem; opacity: 0.75; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.15rem; }
+  .chat-form { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+  .chat-form input { flex: 1; padding: 0.55rem 0.7rem; border-radius: 0.5rem; border: 1px solid var(--border); background: var(--bg); color: var(--fg); font-size: 0.95rem; }
+  .chat-form button { padding: 0.55rem 1rem; border-radius: 0.5rem; border: none; background: var(--accent); color: var(--accent-fg); font-weight: 600; cursor: pointer; }
+  .chat-form button:hover { filter: brightness(1.05); }
+  .empty-state { color: var(--muted); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <h1 id="p-title">Loading…</h1>
+    <span class="live"><span id="live-dot" class="live-dot"></span><span id="live-label">connecting…</span></span>
+  </header>
+  <main class="layout">
+    <section class="card content">
+      <ol id="p-tree" class="tree"></ol>
+    </section>
+    <aside class="card chat-panel">
+      <h2 class="chat-heading">Conversation</h2>
+      <div id="chat-log" class="chat-log"><p class="empty-state">No messages yet.</p></div>
+      <form id="chat-form" class="chat-form" autocomplete="off">
+        <input id="chat-input" type="text" placeholder="Type a message…" autocomplete="off" />
+        <button type="submit">Send</button>
+      </form>
+    </aside>
+  </main>
+</div>
+<script>
+(function () {
+  'use strict';
+
+  function escapeText(node, text) {
+    node.textContent = text == null ? '' : String(text);
+  }
+
+  // --- Conversation panel: hydrate /transcript, subscribe /events, submit ---
+  const chatLog = document.getElementById('chat-log');
+  const chatForm = document.getElementById('chat-form');
+  const chatInput = document.getElementById('chat-input');
+  const liveDot = document.getElementById('live-dot');
+  const liveLabel = document.getElementById('live-label');
+  let chatStarted = false;
+
+  function clearEmptyState() {
+    if (!chatStarted) {
+      chatStarted = true;
+      chatLog.innerHTML = '';
+    }
+  }
+
+  function appendChat(entry) {
+    clearEmptyState();
+    const row = document.createElement('div');
+    row.className = 'chat-entry chat-' + (entry.role === 'learner' ? 'learner' : 'agent');
+    const roleEl = document.createElement('span');
+    roleEl.className = 'chat-role';
+    escapeText(roleEl, entry.role);
+    const textEl = document.createElement('span');
+    escapeText(textEl, entry.text);
+    row.appendChild(roleEl);
+    row.appendChild(textEl);
+    chatLog.appendChild(row);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  async function hydrateTranscript() {
+    try {
+      const res = await fetch('/transcript');
+      const entries = await res.json();
+      entries.forEach(appendChat);
+    } catch (err) {
+      console.error('Could not load transcript', err);
+    }
+  }
+
+  function submitText(text) {
+    return fetch('/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text }),
+    }).catch(function (err) {
+      console.error('Could not submit', err);
+    });
+  }
+
+  function subscribeEvents(onState) {
+    const source = new EventSource('/events');
+    source.onopen = function () {
+      liveDot.className = 'live-dot ok';
+      liveLabel.textContent = 'live';
+    };
+    source.onerror = function () {
+      liveDot.className = 'live-dot bad';
+      liveLabel.textContent = 'reconnecting…';
+    };
+    source.onmessage = function (event) {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (msg.kind === 'chat') {
+        appendChat(msg);
+      } else if (msg.kind === 'state' && typeof onState === 'function') {
+        onState(msg.data);
+      }
+    };
+  }
+
+  chatForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    const text = chatInput.value.trim();
+    if (!text) return;
+    chatInput.value = '';
+    submitText(text);
+  });
+
+  // --- Shell-specific: fetch /data, render, react to live state pushes ---
+  const titleEl = document.getElementById('p-title');
+  const treeEl = document.getElementById('p-tree');
+
+  let current = { title: '', nodes: [] };
+
+  function statusClass(status) {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized.indexOf('done') !== -1 || normalized.indexOf('master') !== -1 || normalized.indexOf('complete') !== -1) return 'done';
+    if (normalized.indexOf('progress') !== -1 || normalized.indexOf('active') !== -1) return 'progress';
+    return 'todo';
+  }
+
+  function confidenceDots(confidence) {
+    const value = Math.max(0, Math.min(5, Number(confidence) || 0));
+    return '●'.repeat(value) + '○'.repeat(5 - value);
+  }
+
+  function render() {
+    document.title = 'Studio — ' + (current.title || 'Progress');
+    escapeText(titleEl, current.title || 'Progress');
+    treeEl.innerHTML = '';
+    const nodes = Array.isArray(current.nodes) ? current.nodes : [];
+    if (!nodes.length) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'No skill-tree nodes yet.';
+      treeEl.appendChild(empty);
+      return;
+    }
+    nodes.forEach(function (node) {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'node-btn';
+      btn.setAttribute('data-status-class', statusClass(node.status));
+
+      const dot = document.createElement('span');
+      dot.className = 'node-dot';
+      btn.appendChild(dot);
+
+      const body = document.createElement('span');
+      body.className = 'node-body';
+
+      const name = document.createElement('span');
+      name.className = 'node-name';
+      escapeText(name, node.name);
+      body.appendChild(name);
+
+      const meta = document.createElement('span');
+      meta.className = 'node-meta';
+      const confidence = document.createElement('span');
+      confidence.className = 'confidence-meter';
+      confidence.textContent = confidenceDots(node.confidence);
+      confidence.setAttribute('aria-label', 'confidence ' + (node.confidence || 0) + ' of 5');
+      const status = document.createElement('span');
+      status.className = 'status-badge';
+      escapeText(status, node.status || 'not started');
+      meta.appendChild(confidence);
+      meta.appendChild(status);
+      body.appendChild(meta);
+
+      btn.appendChild(body);
+      btn.addEventListener('click', function () {
+        submitText("let's work on " + node.name);
+      });
+
+      li.appendChild(btn);
+      treeEl.appendChild(li);
+    });
+  }
+
+  async function loadData() {
+    try {
+      const res = await fetch('/data');
+      if (!res.ok) return;
+      const data = await res.json();
+      current = Object.assign(current, data);
+      render();
+    } catch (err) {
+      console.error('Could not load /data', err);
+    }
+  }
+
+  function onState(data) {
+    // A live state push replaces whichever fields it carries (e.g. an
+    // updated confidence/status after a session) without a full page reload.
+    current = Object.assign({}, current, data || {});
+    render();
+  }
+
+  hydrateTranscript();
+  subscribeEvents(onState);
+  loadData();
+})();
+</script>
+</body>
+</html>
