@@ -76,7 +76,7 @@ async function readJsonIfExists(file) {
   }
 }
 
-async function readManagedFiles(targetRoot) {
+export async function readManagedFiles(targetRoot) {
   const file = path.join(targetRoot, MANAGED_FILES_PATH)
   const value = await readJsonIfExists(file)
   if (!value) {

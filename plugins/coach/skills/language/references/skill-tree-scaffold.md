@@ -36,3 +36,10 @@ When `Learning/<Language>/<Language>.md` is created, or a new row's status becom
 generate that node's content (the specific grammar points, vocabulary set, or functional tasks)
 for this learner's language and level at that time. Do not pre-populate example content for any
 language in the framework repo.
+
+Generating a node's content now means creating its subject doc — `Learning/<Language>/<Stage
+Name>.md` — per the core `learn` skill's Subject docs contract (Key Ideas, Open Questions, So What
+For Me, Belief Updates, Related), not just deciding what to teach in the moment and leaving it
+undocumented. The Subjects table row for that stage wikilinks straight to the subject doc, the
+same way any other subject map's rows link to theirs. A later session that revisits an
+already-instantiated stage updates the existing subject doc rather than creating a new one.

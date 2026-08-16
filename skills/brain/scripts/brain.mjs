@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
+import { syncClaudeCodeAdapter } from './lib/adapters.mjs'
 import { addPlugin, getStatus, initInstance, syncInstance, updateInstance } from './lib/manage.mjs'
 import { validateFramework } from './lib/validate.mjs'
 
@@ -16,7 +17,8 @@ function usage() {
   brain.mjs sync --target PATH [--source PATH]
   brain.mjs update --to VERSION --target PATH [--source PATH]
   brain.mjs status --target PATH [--source PATH]
-  brain.mjs plugin add NAME --target PATH [--source PATH]`
+  brain.mjs plugin add NAME --target PATH [--source PATH]
+  brain.mjs adapter claude-code --target PATH`
 }
 
 async function main(argv) {
@@ -116,6 +118,21 @@ async function main(argv) {
       return
     }
     console.log(`${result.status}: ${result.files.length} managed files`)
+    return
+  }
+
+  if (command === 'adapter' && positionals[0] === 'claude-code') {
+    if (!values.target) throw new Error(`--target is required\n${usage()}`)
+    const result = await syncClaudeCodeAdapter({ targetRoot: path.resolve(values.target) })
+    if (result.conflicts.length) {
+      console.error(`Adapter conflict:\n${result.conflicts.map((file) => `- ${file}`).join('\n')}`)
+      process.exitCode = 2
+      return
+    }
+    console.log(`created: ${result.created.length}, unchanged: ${result.unchanged.length}`)
+    if (result.copied?.length) {
+      console.log(`copied (symlink unsupported): ${result.copied.join(', ')}`)
+    }
     return
   }
 
