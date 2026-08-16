@@ -13,10 +13,15 @@ Both modes render through the same two shells:
 - **Lesson mode** (interactive textbook): one section shown at a time in a centered carousel card
   (prev/next, dots), with an inline answer field under its exercise prompt if any — hints allowed,
   no score recorded. Use `plugins/studio/templates/lesson-shell.html`, data
-  `{title, sections: [{heading, body, exercisePrompt?}], currentIndex?}`. `body`/`exercisePrompt`
-  support minimal inline markdown (`**bold**`, `_italic_`) — no other markup is parsed. Push
-  `currentIndex` via `update.mjs` to auto-advance the carousel after grading an answer, e.g. once
-  the learner's response to the current section's exercise has been judged.
+  `{title, sections: [{heading, body, exercisePrompt?}], currentIndex?, completed?: number[],
+  feedback?: {index, correct, note?}}`. `body`/`exercisePrompt` support minimal inline markdown
+  (`**bold**`, `_italic_`) — no other markup is parsed. When the learner's answer to the current
+  section is correct, push all three of `completed` (append the current index), `feedback`
+  (`{index: currentIndex, correct: true, note}`), and `currentIndex + 1` via `update.mjs` in one
+  call — this gives an inline checkmark on the card, a checkmark dot in the nav rail, and advances
+  the carousel, instead of leaving the learner to notice a chat reply and click next themselves. On
+  an incorrect answer, give feedback in chat only and leave `currentIndex`/`completed` untouched so
+  the learner retries the same card.
 - **Test mode**: prompt to response to feedback, no hints, scored, one evidence record per
   attempt — use `plugins/studio/templates/quiz-shell.html`, data
   `{title, context, prompt, hints: string[]}`. Hints written into the data payload render as

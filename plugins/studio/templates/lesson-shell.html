@@ -8,10 +8,15 @@
   /*
    * lesson-shell: one section shown at a time in a centered carousel card
    * (prev/next + dots), with the conversation panel beside it. Data shape:
-   *   {title, sections: [{heading, body, exercisePrompt?}], currentIndex?}
-   * currentIndex is optional and only meaningful as an agent-pushed state
-   * update (see update.mjs) to auto-advance the carousel; it is not read
-   * back from learner navigation.
+   *   {title, sections: [{heading, body, exercisePrompt?}], currentIndex?,
+   *    completed?: number[], feedback?: {index, correct, note?}}
+   * currentIndex, completed, and feedback are optional and only meaningful
+   * as an agent-pushed state update (see update.mjs): currentIndex advances
+   * the carousel after grading an answer, completed marks section indices
+   * with a checkmark dot, and feedback shows an inline checkmark + note on
+   * the exercise for the section it names. None of these are read back
+   * from learner navigation — the learner's own prev/next/dot clicks only
+   * move currentIndex locally.
    * This CSS/JS block is intentionally duplicated across all four shells so
    * each stays independently self-contained (see
    * plugins/studio/skills/studio/SKILL.md).
@@ -92,8 +97,27 @@
   .nav-btn:hover:not(:disabled) { background: var(--chip-bg); }
   .nav-btn:disabled { opacity: 0.35; cursor: default; }
   .dots { display: flex; align-items: center; gap: 0.4rem; }
-  .dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--border); border: none; padding: 0; cursor: pointer; }
+  .dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: var(--border);
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
   .dot.active { background: var(--accent); }
+  .dot.done {
+    width: 1rem;
+    height: 1rem;
+    background: var(--live-ok);
+    color: #fff;
+    font-size: 0.6rem;
+    line-height: 1;
+  }
   .exercise {
     margin-top: 0.6rem;
     padding: 0.6rem 0.8rem;
@@ -101,6 +125,28 @@
     border: 1px solid var(--chip-border);
     border-radius: 0.5rem;
     font-size: 0.92rem;
+  }
+  .exercise.done { border-color: var(--live-ok); }
+  .exercise-feedback {
+    margin-top: 0.6rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--live-ok);
+  }
+  .exercise-feedback .check {
+    width: 1.1rem;
+    height: 1.1rem;
+    border-radius: 50%;
+    background: var(--live-ok);
+    color: #fff;
+    font-size: 0.7rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
   }
   .exercise .label { color: var(--chip-fg); font-weight: 600; margin-right: 0.35rem; }
   .exercise-form { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
@@ -346,8 +392,11 @@
     card.appendChild(body);
 
     if (section.exercisePrompt) {
+      const completed = Array.isArray(current.completed) ? current.completed : [];
+      const isDone = completed.includes(currentIndex);
+
       const exercise = document.createElement('div');
-      exercise.className = 'exercise';
+      exercise.className = 'exercise' + (isDone ? ' done' : '');
       const label = document.createElement('span');
       label.className = 'label';
       label.textContent = 'Try it:';
@@ -375,16 +424,33 @@
       });
       exercise.appendChild(form);
 
+      const feedback = current.feedback;
+      if (feedback && feedback.index === currentIndex && feedback.correct) {
+        const note = document.createElement('div');
+        note.className = 'exercise-feedback';
+        const check = document.createElement('span');
+        check.className = 'check';
+        check.textContent = '✓';
+        note.appendChild(check);
+        const noteText = document.createElement('span');
+        appendInline(noteText, feedback.note || 'Correct!');
+        note.appendChild(noteText);
+        exercise.appendChild(note);
+      }
+
       card.appendChild(exercise);
     }
 
     stageEl.appendChild(card);
 
+    const completedSet = new Set(Array.isArray(current.completed) ? current.completed : []);
     sections.forEach(function (_, index) {
+      const done = completedSet.has(index);
       const dot = document.createElement('button');
       dot.type = 'button';
-      dot.className = 'dot' + (index === currentIndex ? ' active' : '');
-      dot.setAttribute('aria-label', 'Go to section ' + (index + 1));
+      dot.className = 'dot' + (index === currentIndex ? ' active' : '') + (done ? ' done' : '');
+      if (done) dot.textContent = '✓';
+      dot.setAttribute('aria-label', 'Go to section ' + (index + 1) + (done ? ' (completed)' : ''));
       dot.addEventListener('click', function () {
         currentIndex = index;
         renderCard();
