@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util'
 // serve.mjs instance, which broadcasts it to every open tab over SSE. This is
 // the only way the agent speaks into the page — there is no shared process,
 // so each remark is one local HTTP call, not a persistent connection.
-async function main(argv) {
+export async function main(argv) {
   const { values } = parseArgs({
     args: argv,
     options: {
@@ -20,11 +20,18 @@ async function main(argv) {
     return
   }
 
-  const response = await fetch(`http://127.0.0.1:${values.port}/message`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: values.text }),
-  })
+  let response
+  try {
+    response = await fetch(`http://127.0.0.1:${values.port}/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: values.text }),
+    })
+  } catch (error) {
+    console.error(`Could not reach server on port ${values.port}: ${error.message}`)
+    process.exitCode = 1
+    return
+  }
 
   if (!response.ok) {
     console.error(`Server responded ${response.status}`)
@@ -35,4 +42,6 @@ async function main(argv) {
   console.log('Sent.')
 }
 
-main(process.argv.slice(2))
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main(process.argv.slice(2))
+}

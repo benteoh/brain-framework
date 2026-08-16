@@ -1,10 +1,10 @@
 # Exercise surface contract (v0)
 
 This is a prose contract the agent follows when composing each session's exercise surface by
-hand. It is not a saved template — the reusable shell-template platform (`quiz-shell`,
-`lesson-shell`, `board-shell`, `progress-shell` under a future `studio` templates directory) is
-a deferred v2. When that platform ships, this file is superseded; until then, the agent
-hand-composes self-contained HTML per session following the shape below.
+hand. It is not a saved template — a reusable shell-template platform (`quiz-shell`,
+`lesson-shell`, `board-shell`, `progress-shell` under a `studio` templates directory) is the next
+step. Once that platform ships, this file is superseded; until then, the agent hand-composes
+self-contained HTML per session following the shape below.
 
 ## Two modes, one shape
 
@@ -41,9 +41,10 @@ learner's verbatim response as the deterministic fact, and the agent's assessmen
 stated reasoning when it's a judgment call rather than an exact match) as a separate, clearly
 labeled field.
 
-## Still deferred: v2 reusable shell templates
+## Next step: reusable shell templates
 
 The interaction loop above is real and live; what's still hand-composed per session is the HTML
 itself. See `docs/superpowers/specs/2026-08-15-studio-language-coach-design.md` in the private
 vault, "Deferred: v2 reusable shell templates," for the plan to replace that with a fixed
-template plus a small declarative data payload.
+template plus a small declarative data payload — the next piece of work on this skill, not a
+someday-maybe.

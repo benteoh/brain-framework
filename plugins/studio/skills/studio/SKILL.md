@@ -42,5 +42,3 @@ Studio ships a small, dependency-free local renderer: three Node scripts, no ser
 6. Distil durable conclusions to Markdown as usual — the transcript is a live conversation log, not the learner's permanent record.
 
 Stop the server when the session ends; it holds no state that isn't already in `<transcript-path>`.
-
-This was inspired by how [Lavish AXI](https://github.com/kunchenguid/lavish-axi) opens local HTML artifacts and long-polls for feedback. Studio does not depend on it or any other external package — the above is Brain's own minimal implementation of the same idea.
