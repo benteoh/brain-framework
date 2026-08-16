@@ -10,9 +10,13 @@ earlier (v0) plan of hand-composing self-contained HTML per session.
 
 Both modes render through the same two shells:
 
-- **Lesson mode** (interactive textbook): explanation blocks interleaved with inline exercises,
-  hints allowed, no score recorded — use `plugins/studio/templates/lesson-shell.html`, data
-  `{title, sections: [{heading, body, exercisePrompt?}]}`.
+- **Lesson mode** (interactive textbook): one section shown at a time in a centered carousel card
+  (prev/next, dots), with an inline answer field under its exercise prompt if any — hints allowed,
+  no score recorded. Use `plugins/studio/templates/lesson-shell.html`, data
+  `{title, sections: [{heading, body, exercisePrompt?}], currentIndex?}`. `body`/`exercisePrompt`
+  support minimal inline markdown (`**bold**`, `_italic_`) — no other markup is parsed. Push
+  `currentIndex` via `update.mjs` to auto-advance the carousel after grading an answer, e.g. once
+  the learner's response to the current section's exercise has been judged.
 - **Test mode**: prompt to response to feedback, no hints, scored, one evidence record per
   attempt — use `plugins/studio/templates/quiz-shell.html`, data
   `{title, context, prompt, hints: string[]}`. Hints written into the data payload render as

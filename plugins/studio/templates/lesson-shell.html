@@ -6,9 +6,12 @@
 <title>Studio — Lesson</title>
 <style>
   /*
-   * lesson-shell: explanation blocks interleaved with optional inline
-   * exercise prompts, conversation panel below. Data shape:
-   *   {title, sections: [{heading, body, exercisePrompt?}]}
+   * lesson-shell: one section shown at a time in a centered carousel card
+   * (prev/next + dots), with the conversation panel beside it. Data shape:
+   *   {title, sections: [{heading, body, exercisePrompt?}], currentIndex?}
+   * currentIndex is optional and only meaningful as an agent-pushed state
+   * update (see update.mjs) to auto-advance the carousel; it is not read
+   * back from learner navigation.
    * This CSS/JS block is intentionally duplicated across all four shells so
    * each stays independently self-contained (see
    * plugins/studio/skills/studio/SKILL.md).
@@ -64,10 +67,33 @@
   .layout { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1.25rem; align-items: start; }
   @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.1rem 1.25rem; }
-  .content { display: flex; flex-direction: column; gap: 1rem; }
-  .lesson-section h2 { margin: 0 0 0.4rem; font-size: 1.05rem; font-weight: 600; }
-  .lesson-section .body p { margin: 0 0 0.6rem; color: var(--fg); }
-  .lesson-section .body p:last-child { margin-bottom: 0; }
+  .carousel { display: flex; flex-direction: column; min-height: 26rem; }
+  .carousel-stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 0.5rem 0.25rem; }
+  .carousel-card { width: 100%; max-width: 34rem; }
+  .carousel-counter { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+  .carousel-card h2 { margin: 0 0 0.5rem; font-size: 1.2rem; font-weight: 700; }
+  .carousel-card .body p { margin: 0 0 0.6rem; color: var(--fg); }
+  .carousel-card .body p:last-child { margin-bottom: 0; }
+  .carousel-nav { display: flex; align-items: center; justify-content: center; gap: 1rem; padding-top: 0.85rem; margin-top: 0.5rem; border-top: 1px solid var(--border); }
+  .nav-btn {
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--fg);
+    font-size: 1.15rem;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .nav-btn:hover:not(:disabled) { background: var(--chip-bg); }
+  .nav-btn:disabled { opacity: 0.35; cursor: default; }
+  .dots { display: flex; align-items: center; gap: 0.4rem; }
+  .dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--border); border: none; padding: 0; cursor: pointer; }
+  .dot.active { background: var(--accent); }
   .exercise {
     margin-top: 0.6rem;
     padding: 0.6rem 0.8rem;
@@ -120,7 +146,14 @@
     <span class="live"><span id="live-dot" class="live-dot"></span><span id="live-label">connecting…</span></span>
   </header>
   <main class="layout">
-    <section id="l-sections" class="card content"></section>
+    <section class="card carousel">
+      <div id="l-carousel-stage" class="carousel-stage"></div>
+      <div class="carousel-nav">
+        <button id="l-prev" type="button" class="nav-btn" aria-label="Previous section">‹</button>
+        <div id="l-dots" class="dots"></div>
+        <button id="l-next" type="button" class="nav-btn" aria-label="Next section">›</button>
+      </div>
+    </section>
     <aside class="card chat-panel">
       <h2 class="chat-heading">Conversation</h2>
       <div id="chat-log" class="chat-log"><p class="empty-state">No messages yet.</p></div>
@@ -253,77 +286,129 @@
   });
 
   // --- Shell-specific: fetch /data, render, react to live state pushes ---
+  // One section shown at a time, centered, so a learner focuses on the
+  // current phrase/exercise rather than scanning a long list. Data shape
+  // gains an optional `currentIndex` the agent can push via update.mjs to
+  // advance the carousel after grading an answer; absent a push, the
+  // learner drives it with the prev/next controls or the dots.
   const titleEl = document.getElementById('l-title');
-  const sectionsEl = document.getElementById('l-sections');
+  const stageEl = document.getElementById('l-carousel-stage');
+  const dotsEl = document.getElementById('l-dots');
+  const prevBtn = document.getElementById('l-prev');
+  const nextBtn = document.getElementById('l-next');
 
   let current = { title: '', sections: [] };
+  let currentIndex = 0;
 
-  function render() {
-    document.title = 'Studio — ' + (current.title || 'Lesson');
-    escapeText(titleEl, current.title || 'Lesson');
-    sectionsEl.innerHTML = '';
+  function clampIndex(index, length) {
+    if (!length) return 0;
+    return Math.min(Math.max(index, 0), length - 1);
+  }
+
+  function renderCard() {
     const sections = Array.isArray(current.sections) ? current.sections : [];
+    stageEl.innerHTML = '';
+    dotsEl.innerHTML = '';
+
     if (!sections.length) {
       const empty = document.createElement('p');
       empty.className = 'empty-state';
       empty.textContent = 'No content yet.';
-      sectionsEl.appendChild(empty);
+      stageEl.appendChild(empty);
+      prevBtn.disabled = true;
+      nextBtn.disabled = true;
       return;
     }
-    sections.forEach(function (section) {
-      const wrap = document.createElement('div');
-      wrap.className = 'lesson-section';
 
-      const heading = document.createElement('h2');
-      escapeText(heading, section.heading || '');
-      wrap.appendChild(heading);
+    currentIndex = clampIndex(currentIndex, sections.length);
+    const section = sections[currentIndex];
 
-      const body = document.createElement('div');
-      body.className = 'body';
-      const paragraphs = String(section.body || '').split(/\n{2,}/);
-      paragraphs.forEach(function (para) {
-        if (!para.trim()) return;
-        const p = document.createElement('p');
-        appendInline(p, para.trim());
-        body.appendChild(p);
-      });
-      wrap.appendChild(body);
+    const card = document.createElement('div');
+    card.className = 'carousel-card';
 
-      if (section.exercisePrompt) {
-        const exercise = document.createElement('div');
-        exercise.className = 'exercise';
-        const label = document.createElement('span');
-        label.className = 'label';
-        label.textContent = 'Try it:';
-        const text = document.createElement('span');
-        appendInline(text, section.exercisePrompt);
-        exercise.appendChild(label);
-        exercise.appendChild(text);
+    const counter = document.createElement('div');
+    counter.className = 'carousel-counter';
+    counter.textContent = 'Section ' + (currentIndex + 1) + ' of ' + sections.length;
+    card.appendChild(counter);
 
-        const form = document.createElement('form');
-        form.className = 'exercise-form';
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.placeholder = 'Your answer…';
-        input.autocomplete = 'off';
-        const button = document.createElement('button');
-        button.type = 'submit';
-        button.textContent = 'Send';
-        form.appendChild(input);
-        form.appendChild(button);
-        form.addEventListener('submit', function (event) {
-          event.preventDefault();
-          const value = input.value;
-          input.value = '';
-          submitText(value);
-        });
-        exercise.appendChild(form);
+    const heading = document.createElement('h2');
+    escapeText(heading, section.heading || '');
+    card.appendChild(heading);
 
-        wrap.appendChild(exercise);
-      }
-
-      sectionsEl.appendChild(wrap);
+    const body = document.createElement('div');
+    body.className = 'body';
+    String(section.body || '').split(/\n{2,}/).forEach(function (para) {
+      if (!para.trim()) return;
+      const p = document.createElement('p');
+      appendInline(p, para.trim());
+      body.appendChild(p);
     });
+    card.appendChild(body);
+
+    if (section.exercisePrompt) {
+      const exercise = document.createElement('div');
+      exercise.className = 'exercise';
+      const label = document.createElement('span');
+      label.className = 'label';
+      label.textContent = 'Try it:';
+      const text = document.createElement('span');
+      appendInline(text, section.exercisePrompt);
+      exercise.appendChild(label);
+      exercise.appendChild(text);
+
+      const form = document.createElement('form');
+      form.className = 'exercise-form';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = 'Your answer…';
+      input.autocomplete = 'off';
+      const button = document.createElement('button');
+      button.type = 'submit';
+      button.textContent = 'Send';
+      form.appendChild(input);
+      form.appendChild(button);
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        const value = input.value;
+        input.value = '';
+        submitText(value);
+      });
+      exercise.appendChild(form);
+
+      card.appendChild(exercise);
+    }
+
+    stageEl.appendChild(card);
+
+    sections.forEach(function (_, index) {
+      const dot = document.createElement('button');
+      dot.type = 'button';
+      dot.className = 'dot' + (index === currentIndex ? ' active' : '');
+      dot.setAttribute('aria-label', 'Go to section ' + (index + 1));
+      dot.addEventListener('click', function () {
+        currentIndex = index;
+        renderCard();
+      });
+      dotsEl.appendChild(dot);
+    });
+
+    prevBtn.disabled = currentIndex === 0;
+    nextBtn.disabled = currentIndex === sections.length - 1;
+  }
+
+  prevBtn.addEventListener('click', function () {
+    currentIndex = clampIndex(currentIndex - 1, (current.sections || []).length);
+    renderCard();
+  });
+  nextBtn.addEventListener('click', function () {
+    currentIndex = clampIndex(currentIndex + 1, (current.sections || []).length);
+    renderCard();
+  });
+
+  function render() {
+    document.title = 'Studio — ' + (current.title || 'Lesson');
+    escapeText(titleEl, current.title || 'Lesson');
+    renderCard();
   }
 
   async function loadData() {
@@ -332,6 +417,7 @@
       if (!res.ok) return;
       const data = await res.json();
       current = Object.assign(current, data);
+      if (typeof data.currentIndex === 'number') currentIndex = data.currentIndex;
       render();
     } catch (err) {
       console.error('Could not load /data', err);
@@ -340,8 +426,10 @@
 
   function onState(data) {
     // A live state push replaces whichever fields it carries (e.g. a newly
-    // generated section) without a full page reload.
+    // generated section, or currentIndex to advance the carousel after
+    // grading an answer) without a full page reload.
     current = Object.assign({}, current, data || {});
+    if (data && typeof data.currentIndex === 'number') currentIndex = data.currentIndex;
     render();
   }
 
