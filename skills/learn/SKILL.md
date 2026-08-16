@@ -20,3 +20,18 @@ Use this skill when the user wants to learn, practise, or continue a subject.
 Prefer retrieval and transfer over rereading. A plugin may add domain tools or a richer interface, but the learning loop remains directed by the agent and must retain a Markdown fallback.
 
 Do not treat source collection, chat length, or confident explanation as proof of learning.
+
+## Durable structure
+
+Every subject gets the same shape, so a new subject — or a new domain plugin — never needs its own bespoke file convention:
+
+```
+Learning/<Subject>/
+├── <Subject>.md            # subject map: goal, a Subjects table (name | confidence 1-5 | status),
+│                            # an Open Questions list, links to session notes
+└── Sessions/
+    └── <date> <topic>.md   # subjects touched, focus, what was covered, key insights/evidence,
+                             # subjects updated, open questions raised
+```
+
+"Current focus" is whichever row of the Subjects table is marked "In progress" — never a separate file. A domain plugin may add its own files under `Learning/<Subject>/` for evidence with no generic equivalent (a vocabulary log, imported games, engine analysis), but it must extend this shape rather than reinvent it.

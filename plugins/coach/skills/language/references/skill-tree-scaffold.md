@@ -23,15 +23,16 @@ learner's stated level and goal.
 
 ## Source of truth
 
-`Progress.md` (a plain Markdown table: node, mastery %, last-practiced date, evidence links) is
-the structured log and the source of truth for mastery state. A future interactive
-progress-tree artifact (Studio, using the `dataviz` skill when it is actually built) would only
-*read* this table and let a click jump into a test or lesson for that node — never the reverse.
-Mastery state must never live only inside an artifact.
+`Learning/<Language>/<Language>.md`'s Subjects table — the same subject-map shape the core
+`learn` skill uses for every subject (name, confidence 1–5, status) — is the source of truth for
+mastery state; the four functional milestones below are that table's rows, not a separate
+`Progress.md`. A future interactive progress-tree artifact (Studio, using the `dataviz` skill
+when it is actually built) would only *read* this table and let a click jump into a test or
+lesson for that node — never the reverse. Mastery state must never live only inside an artifact.
 
 ## Instantiation rule
 
-When `Learning/<Language>/Current Focus.md` is created or a new node becomes active, generate
-that node's content (the specific grammar points, vocabulary set, or functional tasks) for this
-learner's language and level at that time. Do not pre-populate example content for any language
-in the framework repo.
+When `Learning/<Language>/<Language>.md` is created, or a new row's status becomes "In progress,"
+generate that node's content (the specific grammar points, vocabulary set, or functional tasks)
+for this learner's language and level at that time. Do not pre-populate example content for any
+language in the framework repo.

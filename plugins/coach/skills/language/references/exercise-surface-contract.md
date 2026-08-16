@@ -29,8 +29,9 @@ area. Self-contained — no CDN scripts, inline any needed CSS/JS.
 4. Agent watches the transcript file for new learner messages and replies with
    `plugins/studio/scripts/say.mjs`, which appears live on the page over SSE, rather than
    waiting for the learner to transcribe results in chat.
-5. At session end, agent distills the session to Markdown: vocabulary entries, evidence records,
-   progress updates; then stops the server.
+5. At session end, agent distills the session per the core `learn` skill's durable structure (a
+   `Sessions/<date> <topic>.md` note plus the subject map's Subjects table) and `Vocabulary.md`;
+   then stops the server.
 
 ## Correctness has no oracle here
 
