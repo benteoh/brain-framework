@@ -53,6 +53,8 @@
     --sq-coord-on-light: #739552;
     --sq-coord-on-dark: #ebecd0;
     --sq-lastmove: rgba(255, 214, 0, 0.42);
+    --verdict-right: #1f9d55;
+    --verdict-wrong: #d13438;
     --sq-check: radial-gradient(circle, rgba(219,40,40,0.9) 0%, rgba(219,40,40,0.6) 45%, rgba(219,40,40,0) 72%);
     --sq-selected: #f2c94c;
     --sq-legal: rgba(15, 118, 110, 0.55);
@@ -100,6 +102,8 @@
       --sq-coord-on-light: #55704a;
       --sq-coord-on-dark: #d8e0c4;
       --sq-lastmove: rgba(255, 214, 0, 0.30);
+      --verdict-right: #2ea86a;
+      --verdict-wrong: #e0524f;
       --sq-selected: #e0b23a;
       --sq-legal: rgba(79, 209, 197, 0.55);
       --sq-legal-capture: rgba(255, 107, 96, 0.55);
@@ -282,6 +286,17 @@
   .board-svg rect.square { cursor: pointer; }
   .board-svg use.piece { cursor: pointer; }
   .board-svg.readonly rect.square, .board-svg.readonly use.piece { cursor: default; }
+  .game-nav { display: flex; align-items: center; gap: 0.4rem; margin: 0.6rem 0 0.2rem; flex-wrap: wrap; }
+  .game-nav-btn {
+    min-width: 2.4rem; padding: 0.3rem 0.55rem; font-size: 0.9rem; line-height: 1;
+    border: 1px solid var(--card-border); border-radius: 6px;
+    background: var(--card-bg); color: var(--fg); cursor: pointer;
+  }
+  .game-nav-btn:hover:not(:disabled) { background: var(--chip-bg); }
+  .game-nav-btn:disabled { opacity: 0.4; cursor: default; }
+  .game-nav-counter { font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--muted); margin-left: 0.2rem; }
+  .game-nav-hint { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
+  .board-card:focus-visible { outline: 2px solid var(--chip-fg); outline-offset: 3px; }
   .board-svg text.coord {
     font-size: 14px;
     font-weight: 700;
@@ -2759,6 +2774,7 @@ const Chess = function (fen) {
   var SQUARE_PX = 60; // px per square in the 480x480 viewBox
   var PIECE_INSET = 0.035; // fraction of a square left as breathing room around a piece
   var SHOW_COORDS = true;
+  var WRONG_MOVE_RESET_MS = 1100; // long enough to register the X, short enough not to nag
   // Retained only for text contexts (aria/plain-text fallbacks); boards render
   // the vector set from the inlined <defs>.
   var PIECE_GLYPHS = {
@@ -2799,6 +2815,7 @@ const Chess = function (fen) {
     var legalDestinations = new Map();
     var pendingPromotion = null;
     var staticArrows = opts.arrows || [];
+    var verdict = null;
     var engineArrow = null; // {from, to} drawn in a distinct colour
     var highlightSquares = opts.highlights || [];
     var onMove = typeof opts.onMove === 'function' ? opts.onMove : null;
@@ -2816,13 +2833,16 @@ const Chess = function (fen) {
     var markerId = id + '-arrow';
     var marker = document.createElementNS(svgNs, 'marker');
     marker.setAttribute('id', markerId);
-    marker.setAttribute('markerWidth', '8');
-    marker.setAttribute('markerHeight', '8');
-    marker.setAttribute('refX', '4');
-    marker.setAttribute('refY', '4');
+    // userSpaceOnUse: the default markerUnits multiplies by stroke-width, which
+    // made an 8-unit head render ~48px wide inside a 60px square.
+    marker.setAttribute('markerUnits', 'userSpaceOnUse');
+    marker.setAttribute('markerWidth', '18');
+    marker.setAttribute('markerHeight', '18');
+    marker.setAttribute('refX', '15');
+    marker.setAttribute('refY', '9');
     marker.setAttribute('orient', 'auto-start-reverse');
     var markerPath = document.createElementNS(svgNs, 'path');
-    markerPath.setAttribute('d', 'M0,0 L8,4 L0,8 Z');
+    markerPath.setAttribute('d', 'M0,1 L17,9 L0,17 Z');
     markerPath.setAttribute('fill', 'context-stroke');
     marker.appendChild(markerPath);
     defs.appendChild(marker);
@@ -2838,7 +2858,42 @@ const Chess = function (fen) {
     // Vector pieces from the inlined <defs> block (see scripts/build-piece-defs.mjs).
     // Rendered as <use> rather than a Unicode text glyph: glyph rendering varies
     // by installed font, and outline-style white glyphs wash out on light squares.
-    function pieceNode(code, x, y, clickSquare) {
+    // A pedagogical verdict drawn over a square: 'right' or 'wrong'. Purely a
+    // presentation concern — the exercise block decides what it means.
+    function verdictNode(square, kind) {
+      var xy = squareToXY(square);
+      // Corner, not centre: a centred badge hides the very piece the learner
+      // just moved, which is the thing they need to see.
+      var r = SQUARE_PX * 0.21;
+      var cx = xy.x + SQUARE_PX - r - 2;
+      var cy = xy.y + r + 2;
+      var g = document.createElementNS(svgNs, 'g');
+      g.setAttribute('class', 'verdict verdict-' + kind);
+      g.style.pointerEvents = 'none';
+      var disc = document.createElementNS(svgNs, 'circle');
+      disc.setAttribute('cx', cx);
+      disc.setAttribute('cy', cy);
+      disc.setAttribute('r', r);
+      disc.setAttribute('fill', kind === 'right' ? 'var(--verdict-right)' : 'var(--verdict-wrong)');
+      disc.setAttribute('stroke', '#fff');
+      disc.setAttribute('stroke-width', '2');
+      g.appendChild(disc);
+      var mark = document.createElementNS(svgNs, 'path');
+      var k = r * 0.5;
+      mark.setAttribute('d', kind === 'right'
+        ? ('M ' + (cx - k) + ' ' + cy + ' l ' + (k * 0.75) + ' ' + (k * 0.8) + ' L ' + (cx + k * 1.05) + ' ' + (cy - k * 0.75))
+        : ('M ' + (cx - k) + ' ' + (cy - k) + ' L ' + (cx + k) + ' ' + (cy + k) +
+           ' M ' + (cx + k) + ' ' + (cy - k) + ' L ' + (cx - k) + ' ' + (cy + k)));
+      mark.setAttribute('stroke', '#fff');
+      mark.setAttribute('stroke-width', Math.max(2.5, SQUARE_PX * 0.075));
+      mark.setAttribute('stroke-linecap', 'round');
+      mark.setAttribute('stroke-linejoin', 'round');
+      mark.setAttribute('fill', 'none');
+      g.appendChild(mark);
+      return g;
+    }
+
+    function pieceNode(code, x, y) {
       var inset = SQUARE_PX * PIECE_INSET;
       var use = document.createElementNS(svgNs, 'use');
       var ref = '#pc-' + code;
@@ -2849,8 +2904,10 @@ const Chess = function (fen) {
       use.setAttribute('width', SQUARE_PX - inset * 2);
       use.setAttribute('height', SQUARE_PX - inset * 2);
       use.setAttribute('class', 'piece');
-      if (clickSquare) use.addEventListener('click', function () { onSquareClick(clickSquare); });
-      else use.style.pointerEvents = 'none';
+      // Pieces are painted after (and therefore above) their square, so they
+      // would swallow clicks meant for it. Letting the rect underneath own
+      // every click keeps one code path for occupied and empty squares alike.
+      use.style.pointerEvents = 'none';
       return use;
     }
 
@@ -2927,7 +2984,12 @@ const Chess = function (fen) {
 
       FILES.forEach(function (file) {
         for (var rankNumber = 1; rankNumber <= 8; rankNumber++) {
-          var square = file + rankNumber;
+          // `let`, not `var`: every click handler created in this loop closes
+          // over this binding. With `var` (function-scoped) all eight handlers
+          // in a file shared one variable holding its final value, so clicking
+          // any square on the g-file called onSquareClick('g8') and the board
+          // silently refused to select anything.
+          let square = file + rankNumber;
           var xy = squareToXY(square);
           var x = xy.x, y = xy.y;
           var isLight = (FILES.indexOf(file) + rankNumber) % 2 === 1;
@@ -2988,7 +3050,7 @@ const Chess = function (fen) {
           var piece = boardMap[square];
           if (piece) {
             var color = piece === piece.toUpperCase() ? 'w' : 'b';
-            svg.appendChild(pieceNode(color + piece.toUpperCase(), x, y, interactive ? square : null));
+            svg.appendChild(pieceNode(color + piece.toUpperCase(), x, y));
           }
 
           if (legalDestinations.has(square)) {
@@ -3008,6 +3070,8 @@ const Chess = function (fen) {
 
       // Coordinates are drawn per-square in the loop above, tinted with the
       // opposite square colour so they stay legible on both shades.
+
+      if (verdict && verdict.square) svg.appendChild(verdictNode(verdict.square, verdict.kind));
 
       staticArrows.forEach(function (arrow) {
         if (arrow && arrow.from && arrow.to) drawArrow(arrow.from, arrow.to, arrow.color ? arrow.color : 'var(--arrow)');
@@ -3093,6 +3157,7 @@ const Chess = function (fen) {
       setInteractive: function (val) { interactive = !!val; svg.classList.toggle('readonly', !interactive); },
       isInteractive: function () { return interactive; },
       clearSelection: function () { clearSelection(); render(); },
+      setVerdict: function (square, kind) { verdict = square ? { square: square, kind: kind } : null; render(); },
       render: render,
     };
   }
@@ -3779,23 +3844,46 @@ const Chess = function (fen) {
       feedbackEl.hidden = false;
       engineFallbackEl.hidden = true;
 
+      // Where the move landed, so a verdict can be drawn on that square. The
+      // board is the thing the learner is looking at; making them find the
+      // answer in a paragraph below it wastes the moment right after they
+      // committed, which is when they are most receptive.
+      var landedOn = null;
+      if (block.mode === 'move') {
+        var played = widget.getChess().history({ verbose: true });
+        if (played.length) landedOn = played[played.length - 1].to;
+      }
+
+      function markWrongAndReset() {
+        if (landedOn) widget.setVerdict(landedOn, 'wrong');
+        setTimeout(function () {
+          if (solved) return;
+          widget.setVerdict(null);
+          widget.setFen(block.fen);
+        }, WRONG_MOVE_RESET_MS);
+      }
+
       if (matched) {
         feedbackEl.className = 'exercise-feedback ' + (matched.correct ? 'correct' : 'incorrect');
         setInlineMarkdown(feedbackEl, matched.feedback || (matched.correct ? 'Correct.' : 'Not quite.'));
         if (matched.correct) {
           solved = true;
+          if (landedOn) widget.setVerdict(landedOn, 'right');
           if (block.mode === 'move') widget.setInteractive(false);
           revealExplanation();
           emitEvent('exercise-solved', ctx.sectionId, ctx.blockIndex, { answer: learnerValue, attempt: attempt });
           markSectionProgress(ctx.sectionId, 'done');
         } else if (block.mode === 'move') {
-          setTimeout(function () { if (!solved) widget.setFen(block.fen); }, 900);
+          markWrongAndReset();
         }
       } else {
         feedbackEl.className = 'exercise-feedback fallback';
         feedbackEl.textContent = 'Not one of the lines I anticipated.';
         showEngineFallback(postMoveFen, displayLabel);
         revealExplanation();
+        // An unanticipated move is still a wrong move: it got the same X and
+        // the same reset, rather than silently leaving the board changed.
+        if (block.mode === 'move') markWrongAndReset();
       }
     }
 
@@ -3927,6 +4015,36 @@ const Chess = function (fen) {
     graphWrap.appendChild(graphApi.el);
     card.appendChild(graphWrap);
 
+    // Keyboard navigation existed but was invisible: nothing on the card said
+    // it was focusable or that the arrow keys did anything. Buttons make the
+    // same actions discoverable, and double as the touch affordance.
+    var nav = document.createElement('div');
+    nav.className = 'game-nav';
+    var navButtons = [
+      ['|\u25c0', 'Jump to start', function () { jumpTo(0); }],
+      ['\u25c0', 'Previous move', function () { jumpTo(currentPly - 1); }],
+      ['\u25b6', 'Next move', function () { jumpTo(currentPly + 1); }],
+      ['\u25b6|', 'Jump to end', function () { jumpTo(game.moves.length); }],
+    ].map(function (spec) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'game-nav-btn';
+      btn.textContent = spec[0];
+      btn.title = spec[1];
+      btn.setAttribute('aria-label', spec[1]);
+      btn.addEventListener('click', function () { spec[2](); card.focus(); });
+      nav.appendChild(btn);
+      return btn;
+    });
+    var plyCounter = document.createElement('span');
+    plyCounter.className = 'game-nav-counter';
+    nav.appendChild(plyCounter);
+    var navHint = document.createElement('span');
+    navHint.className = 'game-nav-hint';
+    navHint.textContent = 'or use \u2190 \u2192 when focused';
+    nav.appendChild(navHint);
+    card.appendChild(nav);
+
     var moveListEl = document.createElement('div');
     moveListEl.className = 'move-list';
     card.appendChild(moveListEl);
@@ -3981,6 +4099,9 @@ const Chess = function (fen) {
       var ann = block.annotations && block.annotations[String(currentPly)];
       if (ann) { annotationEl.hidden = false; setInlineMarkdown(annotationEl, ann); }
       else { annotationEl.hidden = true; }
+      plyCounter.textContent = currentPly + ' / ' + game.moves.length;
+      navButtons[0].disabled = navButtons[1].disabled = currentPly === 0;
+      navButtons[2].disabled = navButtons[3].disabled = currentPly === game.moves.length;
       emitEvent('line-explored', ctx.sectionId, ctx.blockIndex, { ply: currentPly, san: currentPly > 0 ? game.moves[currentPly - 1].san : null });
     }
 
@@ -3988,10 +4109,14 @@ const Chess = function (fen) {
     card.addEventListener('keydown', function (ev) {
       if (ev.key === 'ArrowLeft') { ev.preventDefault(); jumpTo(currentPly - 1); }
       else if (ev.key === 'ArrowRight') { ev.preventDefault(); jumpTo(currentPly + 1); }
+      else if (ev.key === 'Home') { ev.preventDefault(); jumpTo(0); }
+      else if (ev.key === 'End') { ev.preventDefault(); jumpTo(game.moves.length); }
     });
 
     renderMoveList();
     graphApi.setCursor(0);
+    plyCounter.textContent = '0 / ' + game.moves.length;
+    navButtons[0].disabled = navButtons[1].disabled = true;
     wrap.appendChild(card);
     return wrap;
   }
