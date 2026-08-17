@@ -1,0 +1,4333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Studio — Chapter</title>
+<style>
+  /*
+   * chapter-shell: a long-form, self-paced interactive lesson document
+   * (15-60 minutes of content), replacing the one-card-at-a-time drip model
+   * (lesson-shell / quiz-shell). Zero agent latency during the lesson: all
+   * feedback for anticipated answers is pre-authored in the /data payload
+   * and revealed instantly client-side; every board is backed by a live
+   * Stockfish WASM engine (loaded from /assets/*, see EngineManager below)
+   * so the learner can explore unanticipated lines without waiting on the
+   * agent. Data shape:
+   *   { title, subtitle?, estimatedMinutes, provenance?, sections: [
+   *       { id, heading, blocks: [ Block ] }
+   *   ] }
+   * Block union: prose | callout | board | game | exercise | compare | quiz
+   * | recap — see the block renderers in the main script for the exact
+   * shape of each. Every meaningful learner action POSTs a JSON-encoded
+   * {kind:'chapter-event', event, section, block, payload} envelope to
+   * /submit so the agent can debrief from structured evidence instead of
+   * asking "how did it go?" (see docs/superpowers/specs/
+   * 2026-08-16-chapter-mode-engine-coaching-design.md, sections 2, 5, 7).
+   * Free-text questions typed into the ask-the-coach drawer go through as
+   * plain text, NOT wrapped in that envelope.
+   *
+   * chess.js 0.13.4 is vendored below (see its own license block) for
+   * legal-move generation/validation and lightweight PGN move replay —
+   * same vendoring as board-shell.html. This CSS/JS block is intentionally
+   * duplicated across shells so each stays independently self-contained
+   * (see plugins/studio/skills/studio/SKILL.md).
+   */
+  :root {
+    --bg: #f6f6f4;
+    --surface: #ffffff;
+    --surface-2: #fbfbfa;
+    --border: #e2e2de;
+    --fg: #1b1b18;
+    --muted: #66665f;
+    --accent: #0f766e;
+    --accent-fg: #ffffff;
+    --chip-bg: #eef2f0;
+    --chip-fg: #0f766e;
+    --chip-border: #cfe3de;
+    --danger: #b3261e;
+    --live-ok: #1f9d55;
+    --live-bad: #b3261e;
+    --sq-light: #ebecd0;
+    --sq-dark: #739552;
+    --sq-coord-on-light: #739552;
+    --sq-coord-on-dark: #ebecd0;
+    --sq-lastmove: rgba(255, 214, 0, 0.42);
+    --verdict-right: #1f9d55;
+    --verdict-wrong: #d13438;
+    --sq-check: radial-gradient(circle, rgba(219,40,40,0.9) 0%, rgba(219,40,40,0.6) 45%, rgba(219,40,40,0) 72%);
+    --sq-selected: #f2c94c;
+    --sq-legal: rgba(15, 118, 110, 0.55);
+    --sq-legal-capture: rgba(179, 38, 30, 0.55);
+    --board-border: #33352f;
+    --arrow: rgba(15, 118, 110, 0.85);
+    --arrow-best: rgba(15, 118, 110, 0.9);
+    --highlight: rgba(242, 201, 76, 0.55);
+
+    --callout-principle-bg: #eef2f0;
+    --callout-principle-border: #0f766e;
+    --callout-theory-bg: #eef4fb;
+    --callout-theory-border: #2563a6;
+    --callout-warning-bg: #fbeeee;
+    --callout-warning-border: #b3261e;
+    --callout-insight-bg: #f6f0fb;
+    --callout-insight-border: #7c3aed;
+
+    --eval-white: #f6f6f4;
+    --eval-black: #33352f;
+    --eval-blunder: #b3261e;
+    --eval-mistake: #c9852b;
+    --eval-inaccuracy: #c9a92b;
+
+    --shadow: 0 1px 2px rgba(20, 20, 15, 0.06), 0 4px 14px rgba(20, 20, 15, 0.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16171a;
+      --surface: #1e2024;
+      --surface-2: #1a1c1f;
+      --border: #33353a;
+      --fg: #ececea;
+      --muted: #a3a39c;
+      --accent: #4fd1c5;
+      --accent-fg: #0b1f1c;
+      --chip-bg: #223330;
+      --chip-fg: #7ee8db;
+      --chip-border: #2f4a44;
+      --danger: #ff6b60;
+      --live-ok: #3ddc84;
+      --live-bad: #ff6b60;
+      --sq-light: #b3bd9a;
+      --sq-dark: #55704a;
+      --sq-coord-on-light: #55704a;
+      --sq-coord-on-dark: #d8e0c4;
+      --sq-lastmove: rgba(255, 214, 0, 0.30);
+      --verdict-right: #2ea86a;
+      --verdict-wrong: #e0524f;
+      --sq-selected: #e0b23a;
+      --sq-legal: rgba(79, 209, 197, 0.55);
+      --sq-legal-capture: rgba(255, 107, 96, 0.55);
+      --board-border: #0c0d0f;
+      --arrow: rgba(79, 209, 197, 0.85);
+      --arrow-best: rgba(79, 209, 197, 0.9);
+      --highlight: rgba(224, 178, 58, 0.45);
+
+      --callout-principle-bg: #182924;
+      --callout-principle-border: #4fd1c5;
+      --callout-theory-bg: #14202c;
+      --callout-theory-border: #5b9bd9;
+      --callout-warning-bg: #2b1a19;
+      --callout-warning-border: #ff6b60;
+      --callout-insight-bg: #221b2c;
+      --callout-insight-border: #b794f6;
+
+      --eval-white: #ececea;
+      --eval-black: #0c0d0f;
+      --eval-blunder: #ff6b60;
+      --eval-mistake: #e0a94a;
+      --eval-inaccuracy: #d8c65a;
+
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.25);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+  }
+  a { color: var(--accent); }
+  button { font: inherit; }
+
+  /* ---------- reading progress ---------- */
+  .reading-progress {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: transparent;
+    z-index: 60;
+  }
+  .reading-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    transition: width 0.08s linear;
+  }
+
+  /* ---------- header ---------- */
+  .chapter-header {
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: 1.75rem 1.5rem 1.25rem;
+  }
+  .chapter-title { font-size: 1.75rem; margin: 0 0 0.3rem; font-weight: 700; letter-spacing: -0.01em; }
+  .chapter-subtitle { margin: 0 0 0.65rem; color: var(--muted); font-size: 1.05rem; }
+  .chapter-meta { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; font-size: 0.85rem; color: var(--muted); }
+  .chapter-meta .pill {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    background: var(--chip-bg); color: var(--chip-fg);
+    border: 1px solid var(--chip-border); border-radius: 999px;
+    padding: 0.2rem 0.65rem; font-weight: 600; font-size: 0.78rem;
+  }
+  .chapter-provenance { margin-top: 0.6rem; font-size: 0.72rem; color: var(--muted); opacity: 0.85; }
+  .chapter-provenance code { background: var(--chip-bg); border-radius: 0.3rem; padding: 0.05rem 0.3rem; font-size: 0.7rem; }
+
+  /* ---------- layout: toc rail + content ---------- */
+  .chapter-layout {
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: 0 1.5rem 4rem;
+    display: grid;
+    grid-template-columns: 15rem minmax(0, 1fr);
+    gap: 2rem;
+    align-items: start;
+  }
+  .toc {
+    position: sticky;
+    top: 1rem;
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.25rem 0;
+  }
+  .toc-item {
+    display: flex; align-items: center; gap: 0.5rem;
+    text-align: left; background: none; border: none;
+    border-left: 2px solid transparent;
+    padding: 0.4rem 0.6rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    cursor: pointer;
+    border-radius: 0 0.4rem 0.4rem 0;
+  }
+  .toc-item:hover { background: var(--chip-bg); color: var(--fg); }
+  .toc-item.active { color: var(--fg); border-left-color: var(--accent); background: var(--chip-bg); font-weight: 600; }
+  .toc-status {
+    flex-shrink: 0; width: 0.55rem; height: 0.55rem; border-radius: 50%;
+    background: var(--border);
+  }
+  .toc-status.visited { background: var(--accent); }
+  .toc-status.done { background: var(--live-ok); }
+  .toc-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 900px) {
+    .chapter-layout { grid-template-columns: 1fr; }
+    .toc {
+      position: sticky; top: 0; z-index: 40;
+      flex-direction: row; overflow-x: auto; overflow-y: hidden;
+      max-height: none; background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 0.5rem 0.25rem;
+      gap: 0.35rem;
+    }
+    .toc-item { border-left: none; border-bottom: 2px solid transparent; white-space: nowrap; flex-shrink: 0; }
+    .toc-item.active { border-left-color: transparent; border-bottom-color: var(--accent); }
+  }
+
+  .chapter-content { min-width: 0; }
+  .section { padding: 1.25rem 0 2.25rem; border-bottom: 1px solid var(--border); scroll-margin-top: 1rem; }
+  .section:last-child { border-bottom: none; }
+  .section-heading { font-size: 1.35rem; font-weight: 700; margin: 0 0 1.1rem; }
+
+  .block { position: relative; margin: 0 0 1.5rem; }
+  .block:last-child { margin-bottom: 0; }
+  .ask-about {
+    position: absolute; top: 0; right: 0;
+    font-size: 0.7rem; color: var(--muted);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 999px; padding: 0.2rem 0.6rem; cursor: pointer;
+    opacity: 0; transition: opacity 0.12s ease;
+  }
+  .block:hover .ask-about, .block:focus-within .ask-about, .ask-about:focus { opacity: 1; }
+  .ask-about:hover { background: var(--chip-bg); color: var(--chip-fg); }
+
+  /* ---------- prose ---------- */
+  .prose { max-width: 68ch; font-size: 1.02rem; }
+  .prose h2 { font-size: 1.2rem; margin: 1.4rem 0 0.6rem; }
+  .prose h3 { font-size: 1.05rem; margin: 1.1rem 0 0.5rem; }
+  .prose p { margin: 0 0 0.85rem; }
+  .prose ul, .prose ol { margin: 0 0 0.85rem; padding-left: 1.4rem; }
+  .prose li { margin-bottom: 0.3rem; }
+  .prose code { background: var(--chip-bg); border-radius: 0.3rem; padding: 0.08rem 0.35rem; font-size: 0.9em; }
+  .prose > *:first-child { margin-top: 0; }
+  .prose > *:last-child { margin-bottom: 0; }
+
+  /* ---------- callout ---------- */
+  .callout { max-width: 68ch; border-radius: 0.6rem; padding: 1rem 1.15rem; border-left: 4px solid; }
+  .callout-title { font-weight: 700; margin: 0 0 0.35rem; font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  .callout .prose { max-width: none; font-size: 0.98rem; }
+  .callout-principle { background: var(--callout-principle-bg); border-color: var(--callout-principle-border); }
+  .callout-principle .callout-title { color: var(--callout-principle-border); }
+  .callout-theory { background: var(--callout-theory-bg); border-color: var(--callout-theory-border); }
+  .callout-theory .callout-title { color: var(--callout-theory-border); }
+  .callout-warning { background: var(--callout-warning-bg); border-color: var(--callout-warning-border); }
+  .callout-warning .callout-title { color: var(--callout-warning-border); }
+  .callout-insight { background: var(--callout-insight-bg); border-color: var(--callout-insight-border); }
+  .callout-insight .callout-title { color: var(--callout-insight-border); }
+
+  /* ---------- board card (shared by board / exercise / compare / game) ---------- */
+  .board-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 0.8rem; padding: 1.1rem; box-shadow: var(--shadow);
+    max-width: 40rem;
+  }
+  .board-card.wide { max-width: none; }
+  .board-caption { font-size: 0.9rem; color: var(--muted); margin: 0.6rem 0 0; text-align: center; }
+  .board-row { display: flex; gap: 0.75rem; align-items: flex-start; justify-content: center; }
+  .board-holder { position: relative; width: 100%; max-width: 26rem; }
+  .board-svg { width: 100%; height: auto; display: block; touch-action: manipulation; }
+  .board-svg rect.square { cursor: pointer; }
+  .board-svg use.piece { cursor: pointer; }
+  .board-svg.readonly rect.square, .board-svg.readonly use.piece { cursor: default; }
+  .game-nav { display: flex; align-items: center; gap: 0.4rem; margin: 0.6rem 0 0.2rem; flex-wrap: wrap; }
+  .game-nav-btn {
+    min-width: 2.4rem; padding: 0.3rem 0.55rem; font-size: 0.9rem; line-height: 1;
+    border: 1px solid var(--card-border); border-radius: 6px;
+    background: var(--card-bg); color: var(--fg); cursor: pointer;
+  }
+  .game-nav-btn:hover:not(:disabled) { background: var(--chip-bg); }
+  .game-nav-btn:disabled { opacity: 0.4; cursor: default; }
+  .game-nav-counter { font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--muted); margin-left: 0.2rem; }
+  .game-nav-hint { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
+  .board-card:focus-visible { outline: 2px solid var(--chip-fg); outline-offset: 3px; }
+  .board-svg text.coord {
+    font-size: 14px;
+    font-weight: 700;
+    font-family: var(--font-sans, system-ui, sans-serif);
+    pointer-events: none;
+    user-select: none;
+  }
+  .board-status { font-size: 0.85rem; color: var(--muted); min-height: 1.2rem; text-align: center; margin-top: 0.5rem; }
+  .board-status.warn { color: var(--danger); font-weight: 600; }
+  .board-controls { display: flex; align-items: center; justify-content: center; gap: 0.6rem; margin-top: 0.6rem; flex-wrap: wrap; }
+  .board-btn {
+    border: 1px solid var(--chip-border); background: var(--chip-bg); color: var(--chip-fg);
+    border-radius: 0.5rem; padding: 0.35rem 0.7rem; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  }
+  .board-btn:hover:not(:disabled) { filter: brightness(1.06); }
+  .board-btn:disabled { opacity: 0.4; cursor: default; }
+  .promotion-picker { display: flex; gap: 0.5rem; justify-content: center; margin-top: 0.5rem; }
+  .promotion-picker button { font-size: 1.3rem; padding: 0.25rem 0.55rem; border-radius: 0.5rem; border: 1px solid var(--chip-border); background: var(--chip-bg); color: var(--chip-fg); cursor: pointer; }
+
+  /* ---------- eval bar ---------- */
+  .eval-bar-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; width: 1.6rem; flex-shrink: 0; }
+  .eval-bar { width: 1.1rem; height: 100%; min-height: 12rem; border-radius: 0.3rem; overflow: hidden; border: 1px solid var(--board-border); display: flex; flex-direction: column-reverse; background: var(--eval-black); }
+  .eval-bar-fill { width: 100%; background: var(--eval-white); height: 50%; transition: height 0.25s ease; }
+  .eval-bar.thinking .eval-bar-fill { opacity: 0.55; }
+  .eval-label { font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .eval-hidden-note { font-size: 0.78rem; color: var(--muted); text-align: center; margin-top: 0.5rem; font-style: italic; }
+  .top-lines { margin-top: 0.6rem; }
+  .top-lines summary { cursor: pointer; font-size: 0.8rem; color: var(--muted); }
+  .top-lines ol { margin: 0.4rem 0 0; padding-left: 1.3rem; font-size: 0.82rem; }
+  .top-lines li { margin-bottom: 0.25rem; font-variant-numeric: tabular-nums; }
+  .top-lines .pv-eval { font-weight: 700; margin-right: 0.4rem; }
+
+  /* ---------- variation / move list ---------- */
+  .move-list { display: flex; flex-wrap: wrap; gap: 0.2rem 0.35rem; font-size: 0.85rem; margin-top: 0.7rem; max-height: 8.5rem; overflow-y: auto; }
+  .move-pair { display: inline-flex; gap: 0.3rem; align-items: baseline; }
+  .move-num { color: var(--muted); font-size: 0.78rem; }
+  .move-chip { border: none; background: none; color: var(--fg); cursor: pointer; padding: 0.05rem 0.3rem; border-radius: 0.3rem; }
+  .move-chip:hover { background: var(--chip-bg); }
+  .move-chip.current { background: var(--accent); color: var(--accent-fg); font-weight: 700; }
+  .move-chip.blunder { color: var(--eval-blunder); }
+  .move-chip.mistake { color: var(--eval-mistake); }
+  .move-chip.inaccuracy { color: var(--eval-inaccuracy); }
+  .annotation-note { margin-top: 0.6rem; padding: 0.55rem 0.7rem; background: var(--chip-bg); border-radius: 0.5rem; font-size: 0.85rem; }
+
+  /* ---------- game eval graph ---------- */
+  .eval-graph-wrap { margin-top: 0.75rem; }
+  .eval-graph { width: 100%; height: 5.5rem; display: block; cursor: pointer; }
+  .eval-graph .midline { stroke: var(--border); stroke-width: 1; }
+  .eval-graph .area-white { fill: var(--eval-white); opacity: 0.35; }
+  .eval-graph .area-black { fill: var(--eval-black); opacity: 0.35; }
+  .eval-graph .cursor-line { stroke: var(--accent); stroke-width: 1.5; }
+
+  /* ---------- exercise ---------- */
+  .exercise-question { font-weight: 600; margin: 0 0 0.75rem; font-size: 1.02rem; max-width: 68ch; }
+  .exercise-options { display: flex; flex-direction: column; gap: 0.5rem; max-width: 30rem; }
+  .exercise-option {
+    text-align: left; border: 1px solid var(--border); background: var(--surface);
+    border-radius: 0.5rem; padding: 0.55rem 0.8rem; cursor: pointer; font-size: 0.95rem;
+  }
+  .exercise-option:hover { border-color: var(--chip-border); background: var(--chip-bg); }
+  .exercise-option.correct { border-color: var(--live-ok); background: var(--callout-principle-bg); }
+  .exercise-option.incorrect { border-color: var(--danger); background: var(--callout-warning-bg); }
+  .exercise-text-form { display: flex; gap: 0.5rem; max-width: 30rem; }
+  .exercise-text-form input {
+    flex: 1; padding: 0.5rem 0.7rem; border-radius: 0.5rem; border: 1px solid var(--border);
+    background: var(--surface); color: var(--fg); font-size: 0.95rem;
+  }
+  .exercise-text-form button, .quiz-retry, .hint-btn {
+    padding: 0.5rem 0.9rem; border-radius: 0.5rem; border: none; background: var(--accent);
+    color: var(--accent-fg); font-weight: 600; cursor: pointer; font-size: 0.88rem;
+  }
+  .exercise-text-form button:hover, .quiz-retry:hover, .hint-btn:hover { filter: brightness(1.05); }
+  .hint-btn:disabled { opacity: 0.4; cursor: default; }
+  .hint-ladder { margin-top: 0.7rem; display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; }
+  .hint-item { background: var(--chip-bg); border: 1px solid var(--chip-border); border-radius: 0.5rem; padding: 0.5rem 0.7rem; font-size: 0.88rem; max-width: 68ch; }
+  .exercise-feedback { margin-top: 0.85rem; padding: 0.7rem 0.9rem; border-radius: 0.5rem; font-size: 0.92rem; max-width: 68ch; }
+  .exercise-feedback.correct { background: var(--callout-principle-bg); border: 1px solid var(--callout-principle-border); }
+  .exercise-feedback.incorrect { background: var(--callout-warning-bg); border: 1px solid var(--callout-warning-border); }
+  .exercise-feedback.fallback { background: var(--callout-theory-bg); border: 1px solid var(--callout-theory-border); }
+  .exercise-explanation { margin-top: 0.7rem; padding: 0.7rem 0.9rem; border-radius: 0.5rem; background: var(--surface-2); border: 1px solid var(--border); font-size: 0.92rem; max-width: 68ch; }
+  .exercise-engine-fallback { margin-top: 0.6rem; font-size: 0.85rem; color: var(--muted); }
+  .attempt-note { font-size: 0.78rem; color: var(--muted); margin-top: 0.4rem; }
+
+  /* ---------- compare ---------- */
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+  @media (max-width: 720px) { .compare-grid { grid-template-columns: 1fr; } }
+  .compare-label { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.4rem; text-align: center; }
+  .compare-eval { text-align: center; font-size: 0.85rem; color: var(--muted); margin-top: 0.4rem; font-variant-numeric: tabular-nums; }
+  .compare-note { margin-top: 1rem; padding: 0.7rem 0.9rem; background: var(--chip-bg); border-radius: 0.5rem; font-size: 0.92rem; max-width: 68ch; }
+
+  /* ---------- quiz ---------- */
+  .quiz-question { font-weight: 600; margin: 0 0 0.75rem; font-size: 1.02rem; max-width: 68ch; }
+  .quiz-options { display: flex; flex-direction: column; gap: 0.5rem; max-width: 40rem; }
+  .quiz-option-feedback { margin-top: 0.4rem; font-size: 0.85rem; padding: 0.5rem 0.7rem; border-radius: 0.4rem; background: var(--surface-2); }
+  .quiz-actions { margin-top: 0.75rem; }
+
+  /* ---------- recap ---------- */
+  .recap-list { max-width: 68ch; padding-left: 1.4rem; margin: 0; }
+  .recap-list li { margin-bottom: 0.5rem; }
+
+  /* ---------- ask-the-coach drawer ---------- */
+  .coach-toggle {
+    position: fixed; right: 1.25rem; bottom: 1.25rem; z-index: 70;
+    background: var(--accent); color: var(--accent-fg); border: none;
+    border-radius: 999px; padding: 0.7rem 1.1rem; font-weight: 700; font-size: 0.9rem;
+    cursor: pointer; box-shadow: var(--shadow); display: flex; align-items: center; gap: 0.4rem;
+  }
+  .coach-toggle:hover { filter: brightness(1.05); }
+  .coach-toggle .badge { background: var(--accent-fg); color: var(--accent); border-radius: 999px; font-size: 0.7rem; padding: 0.05rem 0.4rem; }
+  .coach-drawer {
+    position: fixed; right: 1rem; bottom: 1rem; z-index: 80;
+    width: min(24rem, calc(100vw - 2rem)); max-height: min(32rem, calc(100vh - 2rem));
+    background: var(--surface); border: 1px solid var(--border); border-radius: 0.9rem;
+    box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden;
+  }
+  .coach-drawer[hidden] { display: none; }
+  .coach-head { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 0.9rem; border-bottom: 1px solid var(--border); }
+  .coach-head h2 { margin: 0; font-size: 0.98rem; }
+  .coach-close { background: none; border: none; color: var(--muted); font-size: 1.1rem; cursor: pointer; line-height: 1; padding: 0.2rem; }
+  .coach-close:hover { color: var(--fg); }
+  .chat-log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem 0.9rem; min-height: 8rem; }
+  .chat-entry { padding: 0.5rem 0.7rem; border-radius: 0.6rem; font-size: 0.88rem; max-width: 92%; }
+  .chat-entry.chat-learner { align-self: flex-end; background: var(--accent); color: var(--accent-fg); }
+  .chat-entry.chat-agent { align-self: flex-start; background: var(--chip-bg); color: var(--fg); }
+  .chat-role { display: block; font-size: 0.68rem; opacity: 0.75; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.15rem; }
+  .chat-form { display: flex; gap: 0.5rem; padding: 0.75rem 0.9rem; border-top: 1px solid var(--border); }
+  .chat-form input { flex: 1; padding: 0.5rem 0.65rem; border-radius: 0.5rem; border: 1px solid var(--border); background: var(--bg); color: var(--fg); font-size: 0.9rem; }
+  .chat-form button { padding: 0.5rem 0.9rem; border-radius: 0.5rem; border: none; background: var(--accent); color: var(--accent-fg); font-weight: 600; cursor: pointer; }
+  .chat-form button:hover { filter: brightness(1.05); }
+  .empty-state { color: var(--muted); font-size: 0.88rem; }
+  .live-note { font-size: 0.7rem; color: var(--muted); display: flex; align-items: center; gap: 0.3rem; padding: 0 0.9rem 0.5rem; }
+  .live-dot { width: 0.45rem; height: 0.45rem; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .live-dot.ok { background: var(--live-ok); }
+  .live-dot.bad { background: var(--live-bad); }
+
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* ---------- print ---------- */
+  @media print {
+    .reading-progress, .toc, .coach-toggle, .coach-drawer, .ask-about,
+    .board-controls, .promotion-picker, .top-lines, .eval-bar-wrap,
+    .exercise-text-form, .hint-btn, .quiz-retry { display: none !important; }
+    .chapter-layout { grid-template-columns: 1fr; display: block; }
+    body { background: #fff; color: #000; }
+    .board-card { box-shadow: none; border: 1px solid #999; break-inside: avoid; }
+    .section { break-inside: avoid-page; border-bottom: none; }
+    a { color: #000; text-decoration: underline; }
+  }
+</style>
+</head>
+<body>
+<!-- PIECE-DEFS:START -->
+<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
+<defs>
+<!-- Piece set: chessnut. Generated by scripts/build-piece-defs.mjs; edit the source art, not this block. -->
+<symbol id="pc-wK" viewBox="0 0 800 800"><path fill="#fff" d="M405.3 700c-59.8 0-116.1-5.3-158.7-14.8-47.4-10.6-71.1-24.6-72.1-42.8L158.1 576v-1.1c0-9.1 5.2-18 15.2-26.5-6.2-21.9-21.6-45.5-36.6-68.4-18.4-28-35.7-54.4-35.7-77.7 0-25.5 18.4-41.4 47.8-41.4h1.3l7 .1 19.3.2c-5.4-26.7-3.8-45.9 5-59.9 13.3-21.5 36.9-24 53.6-24 14.1 0 29.8 2.1 46.4 4.4a54.4 54.4 0 0 1 17.2-36.9c7.8-6.8 17-10.3 27-10.3 21.3 0 42.2 14.9 60.8 28 7 5 13.6 9.7 19 12.5 5.4-2.9 12.1-7.6 19-12.5 18.5-13.1 39.5-28 60.7-28a40 40 0 0 1 27 10.3 54.5 54.5 0 0 1 17.1 36.9c16.6-2.3 32.3-4.4 46.4-4.4 16.6 0 40.3 2.5 53.6 24 8.6 14 10.3 33.3 4.9 60l19.8-.2 6.5-.1h1.3c29.5 0 47.1 15.4 47.1 41.4 0 23.2-17.6 49.7-36.3 77.7-15.2 22.8-30.8 46.3-37 68.1 10.7 8.2 16.1 17.3 16.1 26.8v1.1l-15.8 67.2c-1.6 17.9-25.5 31.9-72.8 42.3A778.1 778.1 0 0 1 405.3 700"/><path d="M325.6 243.8c28.2 0 60.4 33.6 79.8 41.5 19.4-8 51.6-41.5 79.8-41.5 7.3 0 14.5 2.3 21.1 8 10.2 8.9 14.3 22.9 14.6 40.4 20-2.8 38.8-5.7 55-5.7 20.2 0 36.4 4.5 45.8 19.7s7.9 38 1.2 64.3l7.8.1c10.3 0 21.7-.2 30.1-.3h1.2c21.4 0 37.9 9.2 37.9 32.2 0 39.1-60.9 95.7-73.9 146.7v3.3c10.8 6.9 16.5 14.5 16.5 22.5l-15.6 66.9c-1.3 27.2-100 49.1-221.5 49.1-122.3 0-221.5-22.2-221.5-49.7L167.6 575c0-7.9 5.8-15.6 15.6-22.5v-3.6c-11.9-51-72.8-107.6-72.8-146.7 0-23 17.3-32.2 38.7-32.2h1.2c8.5.1 20.3.4 30.6.4l7.5-.1c-6.7-26.4-8.1-49.1 1.3-64.3 9.4-15.1 25.5-19.7 45.8-19.7 16.2 0 35 2.9 55 5.7.3-17.5 4.4-31.6 14.6-40.4 6-5.5 13.1-7.8 20.5-7.8m0-18.3a48.9 48.9 0 0 0-33 12.5 59.4 59.4 0 0 0-18.7 33.5 304 304 0 0 0-38.9-3.2 91.3 91.3 0 0 0-33.7 5.4 55.5 55.5 0 0 0-27.8 22.9c-8.6 14-11.3 32-8.1 55.5l-8.2-.1-7-.1h-1.4a63.8 63.8 0 0 0-38.2 11 47 47 0 0 0-18.8 39.4c0 26 18.1 53.6 37.3 82.7 13.4 20.4 27.3 41.4 34 60.5a41 41 0 0 0-13.6 29.4v2.3l.3 2.2 15.8 64.6c1.1 12.9 10.2 24 27 32.8a216.7 216.7 0 0 0 52.1 17.5c43.1 9.6 100.2 15 160.6 15 60 0 116.7-5.3 159.7-14.8a222.3 222.3 0 0 0 52.1-17.3c17-8.9 26.4-19.8 27.8-32.5l15.1-65.6.3-2.1v-2.2c0-10.8-4.8-20.7-14.4-29.8 6.8-19 20.7-39.9 34.2-60 19.4-29.2 37.8-56.7 37.8-82.7 0-21.1-9.8-33-18.1-39.3a61 61 0 0 0-38-11.2h-1.4l-6.5.1-8.7.1c3.3-23.5.6-41.6-8-55.5a55.5 55.5 0 0 0-27.8-22.9 90.3 90.3 0 0 0-33.6-5.4 304 304 0 0 0-38.9 3.2 59.7 59.7 0 0 0-18.7-33.5 48.9 48.9 0 0 0-33-12.5c-24.2 0-47.4 16.4-66.1 29.7-4.8 3.3-9.6 6.8-13.7 9.4-4.1-2.6-9-6-13.7-9.4-18.7-13.2-41.9-29.6-66.1-29.6"/><g stroke="#000" stroke-miterlimit="10"><g fill="none" stroke-linecap="round"><g stroke-width="18.4"><path d="M187.4 370.4c-11.9.3-25.9-.1-37.5-.3-21.9-.3-39.4 8.7-39.4 32.2 0 39.1 60.6 95.7 73.3 146.7"/><path d="M289.5 292.4c-45.6-6.3-83.3-13.8-100.3 13.7-27 43.6 35.6 150.7 55.1 222.4"/><path d="M404.3 285.7c-24.3-9-67.9-61.7-99.8-33.9-43.6 37.9 22.9 173.9 38.1 260.5m280.7-141.9c11.9.3 25.9-.1 37.5-.3 21.9-.3 39.4 8.7 39.4 32.2 0 39.1-60.6 95.7-73.3 146.7"/><path d="M521.3 292.4c45.6-6.3 83.3-13.8 100.3 13.7 27 43.6-35.6 150.7-55.1 222.4"/><path d="M406.5 285.7c24.3-9 67.9-61.7 99.8-33.9 43.6 37.9-22.9 173.9-38.1 260.5"/></g><path stroke-width="15.1" d="M405.4 271.7v184.5"/></g><path fill="#fff" stroke-width="18.4" d="m632.9 552.5 27.8-68.8c-11.1 14.6-24.8 16.8-33.9 14.3-27-8-26.5-40.6-24.4-66.5-16.4 29.5-39.3 44.7-63.9 39.5-24.9-5.3-40-40.5-39-68.6-17.5 35.6-49.4 54.1-94.1 54.1s-76.6-18.5-94.1-54.1c1.1 28.1-14 63.3-39 68.6-24.6 5.2-47.4-10-63.9-39.5 1.9 25.9 2.6 58.5-24.4 66.5-9.1 2.7-22.9.3-33.9-14.3l27.8 68.8"/><g fill="none"><g stroke-linecap="round" stroke-width="21.6"><path d="M167.9 574.8c0-34.3 106.3-61.7 237.4-61.7s237.4 27.3 237.4 61.7m-475 1.9 16.2 65m459.2-65-16.2 65"/><ellipse cx="405.4" cy="641.1" rx="221.4" ry="49.7"/></g><path stroke-width="30.2" d="M404.3 94.6v189m-61.5-124.2H468"/></g></g></symbol>
+<symbol id="pc-wQ" viewBox="0 0 800 800"><g fill="#fff" stroke="#000" stroke-miterlimit="10"><path stroke-width="20.5" d="M401.1 704.4c-62 0-120.5-5.5-164.8-15.4-49.6-11.1-74.1-25.8-75-44.7l-10.2-54v-.9c0-5.4 1.6-13.2 8.6-21.4-8-46.5-25.9-125.2-44.6-195.5a47.7 47.7 0 1 1 54-14.7C190.2 424.9 216 494.5 234 533l5.3-1.3c-.5-55.3-9.1-164.3-20.6-261.6a51.3 51.3 0 1 1 56.6-10.8c17.9 93.5 47.7 211.6 65.3 258.9l5.4-.3c8.6-66 19.4-184.5 24.6-294.5a54 54 0 1 1 60.7 0c5.2 110.1 16 228.5 24.6 294.5l5.4.3c17.6-47.3 47.4-165.3 65.3-258.9a51.3 51.3 0 1 1 56.6 10.8c-11.6 97.3-20.2 206.3-20.6 261.6l5.3 1.3c18-38.4 43.8-108.1 64.9-175.2a47.7 47.7 0 1 1 54 14.7A2624.1 2624.1 0 0 0 642.2 568a32.5 32.5 0 0 1 8.6 21.3v.9l-10.3 54.3c-1.2 18.9-25.7 33.5-75 44.6-43.8 9.8-102.3 15.3-164.4 15.3zm-189.4-90.7c1.4 3 13.7 12.4 54.6 20.3 36.5 7 84.2 11 134.6 11 50.3 0 98.2-3.9 134.6-11 40.9-8 53.4-17.3 54.6-20.3-1.4-3-13.7-12.4-54.6-20.3-36.5-7-84.2-11-134.6-11-50.3 0-98.2 3.9-134.6 11-40.8 7.9-53.1 17.3-54.6 20.3z"/><path stroke-width="16.2" d="M592.9 607.6c-41.8 13.8-112.3 23.2-191.8 23.2-80.4 0-148.9-9.5-190.6-23.5C197 610.8 171 628.4 171 643c0 28.5 103 51.6 230 51.6s230-23.1 230-51.6c.1-14.2-24.4-31.7-38.1-35.4z"/><path stroke-width="17.3" d="M401.1 591.4c127.1 0 230.1 23.1 230.1 51.6l10.2-60.3c0-6.3-3.2-12.3-9.4-18.1 7.5-44.9 26.1-121.9 47-199.9a38 38 0 1 0-35.1-9.4c-20.8 67-50.1 141.4-70.4 182.4l-20.4-4.9c-.3-54.2 9.2-167.8 21.5-269.9a41.7 41.7 0 1 0-37.2-7.2c-18 95.8-51.2 221.4-69.4 266.1l-20.4-1.3a3816.1 3816.1 0 0 1-26-302.6 44.3 44.3 0 1 0-41 0 3723 3723 0 0 1-26 302.6l-20.4 1.3c-18.1-44.7-51.4-170.3-69.4-266.1a41.6 41.6 0 0 0-25.7-74.3 41.6 41.6 0 0 0-11.6 81.6c12.3 102 21.8 215.5 21.5 269.8l-20.4 4.9a1418.4 1418.4 0 0 1-70.4-182.4 38 38 0 1 0-35.1 9.4c20.8 78 39.5 155 47 199.9-6 5.7-9.4 11.8-9.4 18.1l10.2 60.3c0-28.5 103.1-51.6 230.2-51.6z"/></g><circle cx="401.1" cy="112.9" r="25.9"/><circle cx="226.1" cy="164.8" r="23"/><circle cx="114.9" cy="273.8" r="22.4"/><circle cx="576" cy="164.8" r="23"/><circle cx="688.4" cy="273.8" r="22.4"/></symbol>
+<symbol id="pc-wR" viewBox="0 0 800 800"><path fill="#fff" d="M400.4 708.3c-57.1 0-110.8-5.8-151.2-16.5-45.5-12-68.5-28.4-68.5-48.6V582c0-28.4 44.1-46.2 74.7-55.3l8.1-172.4a31.9 31.9 0 0 1-7.3-8.1l-.2-.3-24.7-52.8c-19.3-9.5-19.3-19-19.3-22.2V145.3h74.5v50.8h43.2v-50.3l137.2.1v50.2H510v-50.8h75.6v125.4c0 7.8-4.2 14.5-13 19.9l-24 55.4-.4.8c-2.1 3.1-5 6-8.5 8.6l7.6 170.9c21.1 6 38.8 13.5 51.5 21.6 16.5 10.5 24.8 21.9 24.8 34.1l-.1 2.5-.1 58.6c0 20.2-23.4 36.6-69.6 48.6-40.9 10.7-95.5 16.6-153.4 16.6"/><path d="M576 155v115.7c0 4.5-3.2 9-10.9 13.1l-24.9 57.7a31.6 31.6 0 0 1-10.4 9L538 534c47.2 12.5 76 30.8 76 48.2l-.1 1.9-.1 59.3c0 30.6-95 55.4-213.3 55.4-116.6 0-210-24.7-210-55.4v-61.2c0-17.2 28.2-35.3 74.4-47.8l8.6-184.7a27.4 27.4 0 0 1-8.9-8.1l-26-55.7c-10.4-4.5-16.8-9.6-16.8-15V155H277v50.8h62.6v-50.3l117.7.1v50.2H520V155zm19.5-19.4h-95.1v50.7h-23.8v-50.2h-19.4l-117.5-.1H320v50.3h-23.8v-50.7h-93.9v135.1c0 15.4 12.5 24.6 21.6 29.5l23.1 49.4.3.8.4.8c1.5 2.6 3.5 5.1 5.8 7.5l-7.6 160.8a198.9 198.9 0 0 0-46.2 20.5 75.8 75.8 0 0 0-19.5 17.1 39.8 39.8 0 0 0-9.3 24.9v61.3c0 18.3 13.9 30.8 25.5 38a184.6 184.6 0 0 0 50.2 20c41.1 10.9 95.7 16.8 153.7 16.8 58.8 0 114-5.9 155.8-16.8a191.2 191.2 0 0 0 50.9-19.9c11.9-7.3 25.9-19.9 25.9-38.1l.1-58.2.1-3c0-8.7-3.1-17.3-9.4-25.2a80.4 80.4 0 0 0-19.9-17.2 198.6 198.6 0 0 0-47.3-20.6l-7-159.1c2.7-2.4 5-5 6.8-7.8l1-1.4.6-1.6 22.5-52.1c12.3-8.7 14.9-18.9 14.9-26.4V135.6z"/><g fill="#fff" stroke="#000" stroke-miterlimit="10"><path stroke-linecap="round" stroke-width="18.4" d="M191 581.6v61.6c0 30.6 93.1 55.4 209.6 55.4 118.3 0 213.2-24.8 213.2-55.4l-.3-61.3"/><path stroke-width="21.6" d="M613.9 582c0 30.6-94.5 55.4-211.1 55.4S191.7 612.6 191.7 582s87.5-64 211.1-64c121.6-.1 211.1 33.3 211.1 64z"/><path stroke-width="15.1" d="m275.8 260.9-10.5 280.6c0 19.7 62.1 34.1 136.8 34.1 74.8 0 136.1-14.4 136.1-33.9l-14.9-280.8z"/><path stroke-width="15.1" d="m231.3 268.1 33.8 73.1c9.5 16.5 61.6 28.5 137.6 28.5s126.4-11.7 137.6-28.5l32.8-73.1"/><path stroke-linecap="square" stroke-width="19.4" d="M522 154v50.8h-63.7v-49.1l-116.6-.1v49.2H278V154h-55.1v116.7c0 20.1 83.1 36.4 178.5 36.4 95.5 0 176.8-16.3 176.8-36.4V154z"/></g></symbol>
+<symbol id="pc-wB" viewBox="0 0 800 800"><path fill="#fff" d="M238.9 701.8c-41.8 0-77-14.8-101.8-42.8-22.9-25.8-35.5-62.1-35.5-102.2 0-58.9 41.1-72.9 77.1-78.5l15.6-2.5-4.8 15c-6.5 20.5-10.2 43-10.2 61.3 0 54.3 24.5 88.1 64.2 88.1 29.5 0 57.2-24.2 71.4-61.1-33-6.6-49.5-16.4-50.1-29.9l-7.3-55.7v-.5c0-9.1 5.9-15.3 13.2-20.3l-5.1-13.8C249 414 228.3 358.1 228.3 315.3c0-50.2 22.1-95.1 62.3-126.5 22.9-32 69.2-68.5 105.3-90.6l5.1-3.1 5.1 3.1c36 22 82.3 58.5 105.3 90.7a157.2 157.2 0 0 1 62.3 126c0 43-20.7 99.4-37.4 144.6l-4.9 13.2c7.2 5 13.2 11.3 13.2 20.3v.6l-7.2 55.5c-.5 13.5-17 23.4-50 29.9 14.1 36.9 41.9 61.1 71.4 61.1 39.5 0 64.2-33.8 64.2-88.1 0-18.5-3.7-40.8-10.2-61.3l-4.8-15 15.6 2.5c25.2 4 42.6 10.8 54.9 21.6 14.9 13.1 22.2 31.8 22.2 56.9 0 40.1-12.6 76.4-35.5 102.2-24.8 28-59.9 42.8-101.8 42.8-65.4 0-118.6-45.1-137.4-115.8a679.3 679.3 0 0 1-49.6 0c-19 70.8-72.1 115.9-137.5 115.9"/><path d="M401.1 106.4c33.5 20.5 80.6 56.8 103.2 89.3A147 147 0 0 1 564 315c0 48.3-28.5 117.6-44.4 161.9 9.7 5.4 15.2 10.2 15.2 16.2l-7.2 55.4c0 9.5-21 17.9-53.1 23.1 13.2 44.7 45.9 78.4 84.2 78.4 45.7 0 73.9-38.9 73.9-97.8 0-20-4-43.3-10.7-64.3 41.5 6.6 68.9 21.9 68.9 68.9 0 75-45.6 135.2-127.5 135.2-62 0-113.6-43.6-129.9-116.1a560.9 560.9 0 0 1-64.8 0c-16.2 72.5-68 116.1-130 116.1-82 0-127.5-60.3-127.5-135.2 0-47 27.4-62.4 68.9-68.9-6.6 21-10.7 44.4-10.7 64.3 0 59 28.1 97.8 73.9 97.8 38.3 0 71.1-33.7 84.2-78.4-32.2-5.2-53.1-13.5-53.1-23L267 493c0-5.9 5.5-10.8 15.2-16.2-15.8-44.3-44.4-113.3-44.4-161.6 0-51 23.9-92.2 59.7-119.7 23-32.4 70.1-68.5 103.6-89.1m0-22.8-10.2 6.3C357 110.6 309.1 147 283.6 182a167.3 167.3 0 0 0-65 133.3c0 44.6 21 101.3 37.8 147l2.6 7.1a31.7 31.7 0 0 0-11.3 23.7v1.3l.2 1.3 7.1 54.8c.3 5.5 2.6 12.9 10.3 19.8 4.1 3.7 9.4 6.8 16.1 9.7 5.6 2.4 12.2 4.5 19.8 6.5a97.2 97.2 0 0 1-19.7 27.4 56 56 0 0 1-38.1 17.1 45.4 45.4 0 0 1-38.4-19c-10.4-13.9-15.9-34.6-15.9-59.4 0-17.5 3.6-38.8 9.7-58.4l9.4-29.9-31 4.9c-27.1 4.3-46 11.9-59.7 23.9-17 14.8-25.5 36.4-25.5 64.3 0 21 3.1 40.8 9.5 59.1a146.7 146.7 0 0 0 28.5 49.6c26.7 30.1 64.4 46 109.1 46 67.6 0 123-44.8 144.6-115.5a513.5 513.5 0 0 0 35.2 0c21.7 70.6 77 115.5 144.6 115.5 44.7 0 82.4-15.9 109.1-46 12.4-14 22-30.7 28.5-49.6 6.3-18.3 9.5-38.1 9.5-59.1 0-27.8-8.5-49.5-25.5-64.3-13.7-12-32.7-19.7-59.7-23.9l-31-4.9 9.4 29.9c6.2 19.7 9.7 40.9 9.7 58.4 0 24.8-5.5 45.5-15.9 59.4a45.7 45.7 0 0 1-38.4 19 56 56 0 0 1-38.1-17.1 96.3 96.3 0 0 1-19.7-27.5c7.6-1.9 14.1-4.1 19.8-6.5 6.7-2.9 12-6 16.1-9.7a28.7 28.7 0 0 0 10.2-19.8l7.1-54.5.1-1.3v-1.4c0-10.5-5.3-18.1-11.3-23.7l2.4-6.5c17-46 38-103.1 38-148a166 166 0 0 0-65-132.8 291.4 291.4 0 0 0-49.4-50.4 510.2 510.2 0 0 0-58-41.8z"/><g stroke="#000" stroke-miterlimit="10"><path fill="none" stroke-linecap="round" stroke-width="16.9" d="m527.8 548.5 7.2-55.7c0-19.7-58.9-35.2-133.9-35.2-75.1 0-133.9 15.7-133.9 35.2l7.2 55.7"/><ellipse cx="401.1" cy="548.5" fill="none" stroke-linecap="round" stroke-width="15.9" rx="126.7" ry="28.4"/><path fill="#fff" stroke-width="18.4" d="M333.9 527.1c0 64.4-40.4 121.9-90.5 121.9-45.7 0-73.9-38.9-73.9-97.8 0-20 4-43.3 10.7-64.3-41.5 6.6-68.9 21.9-68.9 68.9 0 75 45.6 135.2 127.5 135.2 74.5 0 134.2-63.2 135.2-163.6m94.4-.3c0 64.4 40.4 121.9 90.5 121.9 45.7 0 73.9-38.9 73.9-97.8 0-20-4-43.3-10.7-64.3 41.5 6.6 68.9 21.9 68.9 68.9 0 75-45.6 135.2-127.5 135.2-74.5 0-134.2-63.2-135.2-163.6"/><g fill="none"><path stroke-width="20.5" d="M519.8 476.2c15.8-44.7 44.4-113.3 44.4-161.6 0-51-23.9-92.4-59.7-119.9-22.7-32.4-69.9-69.2-103.2-89.7-33.5 20.5-80.6 57.2-103.2 89.7a147.9 147.9 0 0 0-59.7 119.8c0 48.3 28.6 117 44.4 161.7"/><path stroke-width="19.4" d="M401.1 211.2v184.7m-70.2-94h140.4"/></g></g></symbol>
+<symbol id="pc-wN" viewBox="0 0 800 800"><g stroke="#000" stroke-miterlimit="10"><path fill="#fff" stroke-linecap="round" stroke-width="29.2" d="M645.3 692.2V280.6C588 238.8 503 194.8 448.7 182.5c-42.6-9.7-101.3-2.1-148.6 13.2a96 96 0 0 0-81.5-60.4c6.3 29.6 5.9 74.3 24.3 97.7-7 16.2-32.1 69.4-48.7 119.3v39.4a5617.5 5617.5 0 0 0-43.4 212.8L271.7 656l22.4-58.1c15.2-22.7 45.7-60.9 65-78.2 24.5-10.3 55.9-29.4 66.7-59.2 14-38.4 6.3-84.3-10.5-119.9 31 30.2 50 77 50 127.8 0 68.1-38.1 145.9-104.7 223.7h284.7z"/><path stroke-width="9.2" d="M179.8 574.8c19.4-10.9 33.9 3.8 22.4 25.2z"/><path d="M231.5 357.9c-7 9.5-.6 29.3 6 34.5a50 50 0 0 0 18.6-8l21.5-24.9-4.5-3.7a264 264 0 0 0-41.6 2.1z"/><path fill="#fff" stroke-linecap="square" stroke-width="23.8" d="M320 186c-12.4-17.9-9.8-49.7 7-75.1a68.2 68.2 0 0 1 35.2 70.6"/></g></symbol>
+<symbol id="pc-wP" viewBox="0 0 800 800"><g stroke="#000" stroke-miterlimit="10"><path fill="#fff" stroke-width="30.24" d="M497.9 240c0 53.6-44 93.9-98.1 93.9s-98.1-40.3-98.1-93.9 44-93.9 98.1-93.9c54.2.1 98.1 40.4 98.1 93.9zm28.5 97.6v55.3c-30.2 3-42.8 12.1-42.8 28 0 56.9 36 123.4 109.1 187.9v60.9c0 17.4-87.5 30.8-192.7 30.8s-192.7-13.4-192.7-30.8l-.1-60.6c73.1-64.5 108.1-131.1 108.1-188 0-15.9-13.6-25.2-43.8-28.2v-55.3z"/><path fill="none" stroke-width="16.2" d="M207.2 608c0 17.4 87.5 30.3 192.7 30.3s192.6-12.9 192.6-30.2"/><path fill="none" stroke-width="14.04" d="M272.6 386.7h252.7"/></g></symbol>
+<symbol id="pc-bK" viewBox="0 0 800 800"><path d="M694.7 363.2a60.8 60.8 0 0 0-38-11.2h-1.4l-6.5.1-8.5.1c3.3-23.7.6-41.6-8-55.5a55.5 55.5 0 0 0-27.8-22.9 90.3 90.3 0 0 0-33.6-5.4 301 301 0 0 0-38.8 3.2 59.1 59.1 0 0 0-18.7-33.5 48.9 48.9 0 0 0-33-12.5c-24.1 0-47.2 16.3-65.9 29.6v-80.7h49.7v-30.2h-49.7V94.6h-30.2v49.7h-46.4v30.2h46.4v78.9c-18.3-13-40.4-28-63.5-28a48.9 48.9 0 0 0-33 12.5 59.4 59.4 0 0 0-18.7 33.5 304 304 0 0 0-38.9-3.2 91.3 91.3 0 0 0-33.7 5.4 55.5 55.5 0 0 0-27.8 22.9c-8.6 14-11.3 32-8.1 55.5l-8.2-.1-7-.1H144a64 64 0 0 0-38.2 11.1 46.8 46.8 0 0 0-18.6 39.4c0 26.1 18.3 53.8 37.5 83.2l5.7 8.7 25.6 53.9a39 39 0 0 0-11.3 26.8v2.2l.4 2.2 15.7 64.6c1.1 12.9 10.2 24 27 32.9a216.7 216.7 0 0 0 52.1 17.5c43.1 9.7 100.1 15 160.6 15 60 0 116.7-5.3 159.7-14.8a224 224 0 0 0 52.1-17.3c17.1-8.9 26.5-19.9 27.9-32.6l14.7-65.7.6-1.9v-2.1c0-9.4-4-18.1-11.6-26.1l23.8-52.6 7.3-11c19.4-29.2 37.8-56.7 37.8-82.7a47 47 0 0 0-18.1-39.3"/><g stroke="#f2f2f2" stroke-linecap="round" stroke-miterlimit="10"><g fill="none" stroke-width="15.1"><path d="M182 371.5c-11.9.3-25.9-.1-37.5-.3-21.9-.3-39.4 8.7-39.4 32.2 0 39.1 60.6 95.7 73.3 146.7"/><path d="M284.1 293.5c-45.6-6.3-83.3-13.8-100.3 13.7-27 43.6 35.6 150.7 55.1 222.4"/><path d="M398.9 286.8c-24.3-9-67.9-61.7-99.8-33.9-43.6 37.9 22.9 173.9 38.1 260.5m280.7-141.9c11.9.3 25.9-.1 37.5-.3 21.9-.3 39.4 8.7 39.4 32.2 0 39.1-60.6 95.7-73.3 146.7"/><path d="M515.9 293.5c45.6-6.3 83.3-13.8 100.3 13.7 27 43.6-35.6 150.7-55.1 222.4"/><path d="M401.1 286.8c24.3-9 67.9-61.7 99.8-33.9 43.6 37.9-22.9 173.9-38.1 260.5"/></g><path stroke-width="13" d="M177.9 554c34-23.3 120.6-39.6 222-39.6 102.5 0 190.3 16.3 223.6 40l31.8-78.1c-11.8 13.1-23.7 18.5-33.9 15.3-26.9-8.4-26.5-40.6-24.4-66.5-16.4 29.5-39.3 44.7-63.9 39.5-24.9-5.3-40-40.5-39-68.6-17.5 35.6-49.4 54.1-94.1 54.1s-76.6-18.6-94.1-54.2c1.1 28.1-14 63.3-39 68.6-24.6 5.2-47.4-10-63.9-39.5 1.9 25.9 2.6 58.5-24.4 66.5-9.1 2.7-22.1-3.8-33.9-15.3z"/><g fill="none"><path stroke-width="13" d="M162.5 575.9c0-34.3 106.3-61.7 237.4-61.7s237.4 27.3 237.4 61.7m-475 1.8 16.2 65.1m459.2-65.1-16.2 65.1"/><path stroke-width="15.1" d="M178.6 642.2c0-27.4 99.1-49.7 221.4-49.7s221.4 22.2 221.4 49.7"/><path stroke-width="6.5" d="M400 286.8v160.9"/></g></g></symbol>
+<symbol id="pc-bQ" viewBox="0 0 800 800"><path d="M400 704.4c-62 0-120.5-5.5-164.8-15.4-49.7-11.1-74.2-25.8-75-44.8L150 587v-.9c0-5.4 1.6-13.2 8.6-21.4-7.5-43.1-24.6-117.2-44.6-192.2a47.5 47.5 0 0 1-30.8-44.6 47.7 47.7 0 1 1 95.4 0c0 11.1-3.7 21.5-10.6 29.9 21.1 67.1 46.9 136.7 64.9 175.2l5.3-1.3c-.5-55.3-9.1-164.3-20.6-261.6-18.6-8-31-26.6-31-47.1 0-28.3 23-51.3 51.3-51.3a51.34 51.34 0 0 1 36.3 87.6c17.9 93.5 47.7 211.6 65.3 258.9l5.4-.3c8.6-66 19.4-184.5 24.6-294.5a53.24 53.24 0 0 1-23.8-44.5c0-29.8 24.2-54 54-54a54.03 54.03 0 0 1 30.5 98.6c5.2 110.1 16 228.5 24.6 294.5l5.4.3c17.6-47.3 47.4-165.3 65.3-258.9a51.34 51.34 0 0 1 36.3-87.6c28.3 0 51.3 23 51.3 51.3 0 20.6-12.4 39.1-31 47.1-11.6 97.3-20.2 206.3-20.6 261.6l5.3 1.3c18-38.4 43.8-108.1 64.9-175.2a46.88 46.88 0 0 1-10.6-29.9 47.7 47.7 0 1 1 95.4 0 47.5 47.5 0 0 1-30.8 44.6c-19.9 75.1-37 149.1-44.6 192.2 5.7 6.7 8.6 13.8 8.6 21.3v.9l-10.3 57.7c-1.2 18.9-25.7 33.5-75 44.6-43.8 9.6-102.3 15.1-164.4 15.1m-185-71.7c10.8 7.2 34.9 14.3 66.2 19.1 34.3 5.4 75.4 8.2 118.8 8.2 98 0 163.9-13.8 184.2-26.9l3.3-2.9c-4.2-4.2-17-11.4-48.7-17.7-35.3-6.9-84.7-10.7-138.9-10.7-50.3 0-98.2 3.9-134.6 11-33.2 6.5-47.5 13.8-52.6 17.9z"/><path d="M400 134.5c24.4 0 44.3 19.9 44.3 44.3 0 17.1-9.6 31.9-23.8 39.2 5.1 114 16.8 242.6 26 309.1l20.4 1.3c18.1-44.7 51.4-176.8 69.4-272.6a41.38 41.38 0 0 1-15.9-32.7c0-23 18.6-41.6 41.6-41.6s41.6 18.6 41.6 41.6c0 19-12.7 35-30.2 40-12.3 102.1-21.8 222-21.5 276.4l20.4 4.9c20.3-41.1 49.7-121.9 70.4-188.9a37.98 37.98 0 0 1 26.2-65.5 37.98 37.98 0 0 1 8.9 74.9c-20.8 78-39.5 158.2-47 203.1 6 5.7 9.4 11.8 9.4 18.1l-10.2 57-.1.1c0 28.5-103 51.6-230 51.6-127.1 0-230-23.4-230-51.5l-10.2-57.1c0-6.3 3.2-12.5 9.4-18.3-7.5-44.9-26.1-125.2-47-203.1-16.6-4-29.1-19-29.1-36.9 0-21 17-38 38-38 21.1 0 38 17 38 38 0 10.8-4.5 20.6-11.8 27.5 20.8 67 50.1 147.9 70.4 188.9l20.4-4.9c.3-54.2-9.2-174.3-21.5-276.4-17.4-5-30.2-21-30.2-40 0-23 18.6-41.6 41.6-41.6s41.6 18.6 41.6 41.6c0 13.3-6.3 25.1-15.9 32.7 18 95.8 51.2 227.9 69.4 272.6l20.4-1.3c9.1-66.5 20.8-195 26-309.1-14.1-7.5-23.8-22.1-23.8-39.2.1-24.3 20-44.2 44.4-44.2m0 535.3c89.4 0 165-12.1 190.2-28.8l9-7.9c0-25.6-89.1-41-199-41s-199 18.4-199 41l8.1 7.2c24 17 100.3 29.5 190.7 29.5m0-554.7a63.8 63.8 0 0 0-63.7 63.7c0 19.3 8.6 37.3 23.2 49.2-4.4 92.8-12.9 190.8-20.5 257.8-17-55.4-39.6-148.1-54.3-223.5a60.77 60.77 0 0 0 14.4-39.3c0-33.7-27.3-61-61-61s-61 27.3-61 61c0 13.5 4.3 26.4 12.6 37.2 5.2 6.7 11.7 12.3 19.1 16.4 9.1 77.4 16.2 161.5 18.9 219.2-15.3-37.6-33.2-87.4-48.6-136.3 6.2-9.3 9.6-20.4 9.6-31.6 0-31.6-25.8-57.5-57.5-57.5-31.6 0-57.6 25.7-57.6 57.3 0 22.5 12.9 42.2 32.3 51.6 18.7 70.8 34.8 140.2 42.4 182.6-6.5 9.1-8.1 17.7-8.1 24v1.7l.3 1.7 9.9 55.8c.4 5.7 2.6 13.5 9.7 21.4 4.6 5 10.7 9.4 18.7 13.6 13.1 6.9 31.3 13.1 54.1 18.1 45 10.2 104.3 15.7 167 15.7 62.9 0 122.1-5.5 167-15.7 22.8-5.1 41-11.2 54.1-18.3 8-4.2 14-8.7 18.7-13.7 4.1-4.5 6.6-9.1 8-13.2l.3-.3.3-1.8c.5-1.9.9-3.8 1-5.5l10-56.4.3-1.7V586c0-6.2-1.6-14.8-8.1-23.9 7.6-42.4 23.8-111.8 42.4-182.6a57.4 57.4 0 0 0 32.3-51.6c0-31.6-25.8-57.5-57.5-57.5-31.6 0-57.5 25.8-57.5 57.5 0 11.3 3.3 22.4 9.6 31.6-15.4 48.9-33.4 98.7-48.6 136.3 2.7-57.8 9.8-141.8 18.9-219.2 7.3-4.1 13.9-9.6 19.1-16.4a60.54 60.54 0 0 0 12.6-37.2c0-33.7-27.3-61-61-61s-61 27.3-61 61c0 14.6 5.1 28.4 14.4 39.3-14.7 75.4-37.4 168-54.3 223.5-7.7-67-16.1-164.9-20.5-257.8a63.37 63.37 0 0 0 23.1-49.1c.2-35.2-28.4-63.8-63.5-63.8M234 631c8.5-3 21.6-6.7 41.3-10 34.7-6 78.9-9.3 124.7-9.3 48 0 91.2 2.9 125.1 8.4 21.1 3.5 34.3 7.1 42.7 10.4-9.5 3.6-25.5 8.1-51.5 12.1-33.7 5.2-73.9 7.9-116.2 7.9-42.9 0-83.4-2.8-117.3-8.1-24-3.8-39.2-8.1-48.8-11.4"/><circle cx="400" cy="112.9" r="25.9"/><circle cx="225" cy="164.8" r="23"/><circle cx="113.8" cy="273.8" r="22.4"/><circle cx="575" cy="164.8" r="23"/><circle cx="687.3" cy="273.8" r="22.4"/><g fill="none" stroke="#f2f2f2" stroke-linecap="round" stroke-miterlimit="10"><path stroke-width="17.28" d="m117.6 287.9-4.5-15"/><path stroke-width="18.36" d="m228.8 180.7-4.4-18"/><path stroke-width="17.28" d="m682.7 287.9 4.6-15"/><path stroke-width="18.36" d="m570.4 180.7 4.6-18"/><path stroke-width="20.52" d="M399.5 108.6V127"/><g stroke-linejoin="round" stroke-width="15.12"><path d="M263.7 255.8c9.7-7.6 15.9-19.4 15.9-32.7 0-23-18.6-41.6-41.6-41.6s-41.6 18.6-41.6 41.6c0 19 12.7 35 30.2 40 12.3 102.1 21.8 215.6 21.5 269.9l-20.4 4.9M420.5 218c14.1-7.5 23.8-22.1 23.8-39.2 0-24.4-19.9-44.3-44.3-44.3s-44.3 19.9-44.3 44.3c0 17.1 9.6 31.9 23.8 39.2-5.1 114-16.8 236.1-26 302.6l-20.4 1.3M573.3 263c17.4-5 30.2-21 30.2-40 0-23-18.6-41.6-41.6-41.6S520.3 200 520.3 223c0 13.3 6.3 25.1 15.9 32.7-18 95.8-51.2 221.4-69.4 266.1l-20.4-1.3m231.5-155.7c16.6-4 29.1-19 29.1-36.9 0-21-17-38-38-38a37.98 37.98 0 0 0-26.2 65.5c-20.8 67-50.1 141.4-70.4 182.4l-20.4-4.9"/><path d="M157.2 355.4a37.98 37.98 0 0 0-26.2-65.5c-21.1 0-38 17-38 38 0 17.9 12.4 32.9 29.1 36.9 20.8 78 39.5 155 47 199.9-6 5.7-9.4 11.8-9.4 18.1l10.2 60.3c0-28.5 103-51.6 230.1-51.6s230.1 23.1 230.1 51.6l10.2-60.3c0-6.3-3.2-12.3-9.4-18.1"/></g></g></symbol>
+<symbol id="pc-bR" viewBox="0 0 800 800"><path d="M398.3 708.2c-56.2 0-108.6-5.8-148.3-16.5-44.6-12.1-67.1-28.4-67.1-48.5V582c0-28.3 43.1-46.1 73.2-55.2l7.9-172.5a28.5 28.5 0 0 1-7.2-8.2l-.2-.3-24.3-52.8c-7-3.5-19-10.7-19-22.2V145.3h73.4v50.8h42.1v-50.2l135 .1v50.1h42.1v-50.8h74.5v125.4c0 7.7-4.1 14.4-12.7 19.8L544.1 346l-.4.8q-3.15 4.65-8.4 8.7l7.5 171.1a196 196 0 0 1 50.5 21.6c16.2 10.5 24.3 21.8 24.3 34l-.1 2.5-.1 58.8c0 20.2-23 36.5-68.4 48.5-40.4 10.3-93.8 16.2-150.7 16.2"/><path d="M570.6 155v115.7c0 4.5-3.1 9-10.7 13.1l-24.5 57.7a30.7 30.7 0 0 1-10.2 9l8 183.5c46.3 12.5 74.6 30.8 74.6 48.2l-.1 1.9-.1 59.3c0 30.6-93.1 55.4-209.2 55.4-114.5 0-205.8-24.7-205.8-55.4v-61.2c0-17.2 27.4-35.3 72.8-47.8l8.4-184.7c-4-2.6-7.1-5.3-8.7-8.1l-25.6-55.7c-10.2-4.5-16.6-9.6-16.6-15V155h54v50.8h61.6v-50.3l115.6.1v50.2h61.6V155zm19.5-19.4h-92.9v50.7h-23.8v-50h-19.3l-115-.1H320v50.1h-23.8v-50.7h-92.7v135.1c0 15.3 12.4 24.4 21.3 29.3l22.8 49.5.3.8.4.8c1.5 2.7 3.5 5.2 5.7 7.5l-7.3 161.1a191.2 191.2 0 0 0-45.4 20.6c-12.9 8.4-28.1 22.6-28.1 41.8v61.2c0 18 13.5 30.6 24.8 37.8 12 7.7 28.5 14.4 49.4 20 40.4 10.9 94 16.8 151 16.8 57.7 0 112.1-6 153.1-16.8a183.8 183.8 0 0 0 50.1-20c11.6-7.2 25.4-19.8 25.4-37.9l.1-58.2.1-3c0-8.6-3.1-17.1-9.2-24.9a76 76 0 0 0-19.5-17.2 192.4 192.4 0 0 0-46.4-20.7l-6.9-159.5c2.7-2.5 4.9-5.1 6.7-7.8l1-1.4.6-1.5 22.1-52.1c12.1-8.6 14.7-18.8 14.7-26.1V135.6z"/><g fill="none" stroke="#f2f2f2" stroke-linecap="round" stroke-miterlimit="10"><path stroke-linejoin="round" stroke-width="16.1" d="M606.1 586.6c-8.9 28.4-96.9 50.8-205.4 50.8-114.5 0-208.3-25.1-208.3-55.6"/><path stroke-width="13" d="M534.3 541.2c0 19.7-60.9 33.9-134.4 33.9h.1c-73.4 0-134.4-14.3-134.4-33.9l6.5-190.7"/><path stroke-width="10.8" d="M534.6 341.3C525.2 357.9 472.9 370 400 370h.1c-72.9 0-125.3-12.1-134.7-28.6l-24.5-54.5"/><path stroke-width="15.1" d="M572.8 270.6V154h-57.2v50.8H454v-49.1l-115.6-.1v49.2h-61.6V154H224v116.6c0 20.1 81.5 36.4 175.3 36.4 93.7 0 173.5-16.2 173.5-36.4z"/></g></symbol>
+<symbol id="pc-bB" viewBox="0 0 800 800"><path d="M237.8 702.4c-42 0-77.3-14.9-102.2-43-23-25.9-35.6-62.3-35.6-102.5 0-59.2 41.5-73.3 77.5-79.1l16.4-2.6-5 15.8a213 213 0 0 0-10.2 61.2c0 54 24.4 87.6 63.6 87.6 29.2 0 56.6-23.8 70.7-60.2a157.1 157.1 0 0 1-29.1-8.4c-13.4-5.6-20.1-13-20.5-21.8l-7-55.7v-.6c0-9.1 5.6-15.6 12.9-20.5l-5.1-13.5c-16.6-44.9-37.3-100.9-37.3-143.7 0-50.4 22.1-95.4 62.4-126.9 10.9-15.3 27.2-32 48.5-49.7 17.8-14.8 38-29.3 56.9-40.9l5.4-3.2 5.4 3.2c36.1 22.1 82.4 58.6 105.4 90.7a157.9 157.9 0 0 1 62.5 126.5c0 43.1-20.7 99.5-37.5 144.7l-4.4 12.7c7.2 5 13.3 11.4 13.3 20.5v.6l-7.6 55.6c-.6 13.7-17.1 23.7-50 30.3 14.1 36.4 41.5 60.2 70.6 60.2 39.2 0 63.5-33.6 63.5-87.6 0-18.4-3.7-40.7-10.2-61.2l-5-15.8 16.3 2.6c25.3 4 42.8 10.9 55.2 21.7 15 13.2 22.4 32 22.4 57.3 0 40.2-12.6 76.6-35.6 102.5-24.8 28.1-60.3 43-102.2 43-65.6 0-118.8-45.1-137.8-115.7a653 653 0 0 1-48.8 0c-18.9 70.7-72.3 115.9-137.8 115.9"/><path d="M400 106.5c33.5 20.5 80.6 56.7 103.2 89.2A147.2 147.2 0 0 1 563 315c0 48.3-28.5 117.6-44.4 161.9 9.7 5.4 15.2 10.2 15.2 16.2l-7.2 55.4c0 9.5-21 17.9-53.1 23.1 13.2 44.7 45.9 78.4 84.2 78.4 45.7 0 73.9-38.9 73.9-97.8 0-20-4-43.3-10.7-64.3 41.5 6.6 68.9 21.9 68.9 68.9 0 75-45.6 135.2-127.5 135.2-62 0-113.6-43.6-129.9-116.1a560.9 560.9 0 0 1-64.8 0c-16.3 72.5-68 116.1-130 116.1-82 0-127.5-60.3-127.5-135.2 0-47 27.4-62.4 68.9-68.9-6.6 21-10.7 44.4-10.7 64.3 0 59 28.1 97.8 73.9 97.8 38.3 0 71.1-33.7 84.2-78.4-32.2-5.2-53.1-13.5-53.1-23L266 493c0-5.9 5.5-10.8 15.2-16.2-15.8-44.3-44.4-113.3-44.4-161.6 0-51 23.9-92.2 59.7-119.7 22.9-32.4 70-68.4 103.5-89m0-24L389.3 89c-34 20.8-82 57.1-107.6 92.1a168.1 168.1 0 0 0-65.2 134c0 44.7 21.1 101.6 37.9 147.3l2.4 6.5a32.7 32.7 0 0 0-11.2 24.1v1.3l.2 1.3 7.1 54.8c.3 5.7 2.7 13.4 10.6 20.4 4.2 3.8 9.5 6.9 16.4 9.8 5.3 2.3 11.6 4.3 18.6 6.2a96.8 96.8 0 0 1-18.9 26c-8 7.7-21 16.7-37.4 16.7a44.7 44.7 0 0 1-37.6-18.6c-10.3-13.8-15.7-34.1-15.7-58.8 0-17.4 3.6-38.6 9.7-58.1l9.9-31.6-32.7 5.2c-37 5.8-86.2 21.5-86.2 89.2 0 21.1 3.2 41 9.5 59.4 6.5 19 16.2 35.7 28.7 49.9 26.9 30.3 64.9 46.4 109.8 46.4 67.9 0 123.4-44.7 145.5-115.5l16.8.2 16.8-.2c21.9 70.7 77.5 115.5 145.5 115.5 45 0 82.9-16.1 109.8-46.4a147.5 147.5 0 0 0 28.7-49.9c6.3-18.4 9.5-38.3 9.5-59.4 0-67.7-49.1-83.4-86.2-89.2l-32.7-5.2 9.9 31.6c6.2 19.5 9.7 40.7 9.7 58.1 0 24.6-5.4 44.9-15.7 58.8a44.7 44.7 0 0 1-37.6 18.6 55.5 55.5 0 0 1-37.4-16.7c-7.2-7-13.7-15.9-18.9-26a128 128 0 0 0 18.7-6.2 60.4 60.4 0 0 0 16.4-9.9 29.8 29.8 0 0 0 10.6-20.4l7.1-54.5.1-1.3v-1.4c0-10.6-5.2-18.4-11.1-24 .6-1.9 1.4-3.9 2.2-5.8 17-46 38-103.4 38-148.3 0-52.9-23.1-100.2-65.2-133.6A277.9 277.9 0 0 0 469 131a534.5 534.5 0 0 0-58.1-41.9z"/><g fill="none" stroke="#f2f2f2" stroke-miterlimit="10"><g stroke-width="15.1"><g stroke-linecap="round"><path d="m526.7 548.5 7.2-55.7c0-19.7-58.9-35.2-133.9-35.2-75.1 0-133.9 15.7-133.9 35.2l7.2 55.7"/><path d="M273.4 548.5c0-15.7 56.7-28.4 126.7-28.4s126.7 12.7 126.7 28.4"/><path d="M169.8 491.2c-35.2 6.3-58.5 21.1-58.5 66.2 0 72 38.8 126.7 108.3 126.7 63.3 0 113.9-59.6 114.8-156.2m295.7-36.7c35.2 6.3 58.5 21.1 58.5 66.2 0 72-38.8 126.7-108.3 126.7-63.3 0-113.9-59.6-114.8-156.2"/></g><path d="M518.7 476.2c15.8-44.7 44.4-113.3 44.4-161.6 0-51-23.9-92.1-59.7-119.7-22.7-32.4-69.9-69-103.2-89.5-33.5 20.5-80.6 57.1-103.2 89.5a147.6 147.6 0 0 0-59.7 119.7c0 48.3 28.6 116.9 44.4 161.6"/></g><path stroke-width="17.3" d="M398.9 211.2v184.7m-69.1-94h140.4"/></g></symbol>
+<symbol id="pc-bN" viewBox="0 0 800 800"><path d="M137.8 605.9c8-43 28.9-151 43.3-212v-40l.5-1.6c13.9-41.9 33.6-85.5 44.1-109l2.6-5.7c-11.9-19-15.2-45.7-18.4-69.4-1.3-9.9-2.5-19.3-4.2-27.3l-2.9-13.7 14 .8a106.4 106.4 0 0 1 83.6 51.9c-5.9-21.6-.9-49.4 14.4-72.1l5.8-8.7 9.4 4.8a81 81 0 0 1 42.6 68.7c10.7-1.1 21.2-1.6 31.1-1.6 16.7 0 32 1.5 45.3 4.5 53 12 139.4 55 200.9 99.9l4.4 3.2v428.3H334.8L350 689c66.7-78.1 102.1-153 102.1-216.9 0-22-3.9-43.7-11.1-63.5 1.4 21.1-1 41.3-7.5 59.1-12.6 34.9-49.1 55.3-70.8 64.7a508.8 508.8 0 0 0-61.3 74l-25.9 67.4-139.1-59.3z"/><path fill="#f2f2f2" d="M177.4 578.1c19.4-10.9 33.9 3.8 22.4 25.2zm51.6-217c-6.9 9.5-.6 29.3 6 34.5a50 50 0 0 0 18.6-8l21.5-24.9-4.5-3.7c-8.7-.1-30.7-.1-41.6 2.1m90.8-160.8.6-2.9c31.1-5.1 73-6 97.3-6 45.7 0 148 58.8 209.5 104.1v55.1c-45-43.5-141.2-118.8-196.3-135.8a335.3 335.3 0 0 0-111.1-14.5"/></symbol>
+<symbol id="pc-bP" viewBox="0 0 800 800"><path d="M489.3 418.3c.1-17 12-25.1 65.1-29.9V330h-90.7c32-19.5 52.8-53.5 52.8-92.9 0-61.9-51.3-110.4-116.7-110.4s-116.7 48.5-116.7 110.4a108 108 0 0 0 52.8 92.9h-91.4v58.4c53.7 4.8 65.2 12.9 65.2 29.8 0 60.7-37.6 131.5-115.5 200.1l.1 64c0 18.6 93.2 32 205.3 32s205.4-13.5 205.4-32l.1-64c-77.9-68.5-115.8-139.4-115.8-200"/><path fill="none" stroke="#f2f2f2" stroke-linecap="round" stroke-miterlimit="10" stroke-width="19.4" d="M232.1 627.2c0 13.7 76 25.7 167.6 25.7 91.5 0 167.4-11 167.4-24.6"/><path fill="none" stroke="#f2f2f2" stroke-linecap="round" stroke-miterlimit="10" stroke-width="16.2" d="M400.9 150.3c-24-.2-47.6 8.6-66.3 27.3a87.5 87.5 0 0 0-20 95.3"/></symbol>
+</defs></svg>
+<!-- PIECE-DEFS:END -->
+<div class="reading-progress"><div id="reading-progress-fill" class="reading-progress-fill"></div></div>
+
+<header class="chapter-header">
+  <h1 id="c-title" class="chapter-title">Loading…</h1>
+  <p id="c-subtitle" class="chapter-subtitle" hidden></p>
+  <div class="chapter-meta">
+    <span id="c-minutes" class="pill" hidden></span>
+  </div>
+  <p id="c-provenance" class="chapter-provenance" hidden></p>
+</header>
+
+<div class="chapter-layout">
+  <nav id="c-toc" class="toc" aria-label="Chapter sections"></nav>
+  <main id="c-content" class="chapter-content"></main>
+</div>
+
+<button id="coach-toggle" class="coach-toggle" type="button" aria-expanded="false" aria-controls="coach-drawer">
+  Ask the coach
+</button>
+<aside id="coach-drawer" class="coach-drawer" hidden aria-label="Ask the coach">
+  <div class="coach-head">
+    <h2>Ask the coach</h2>
+    <button id="coach-close" class="coach-close" type="button" aria-label="Close">✕</button>
+  </div>
+  <div id="chat-log" class="chat-log"><p class="empty-state">No messages yet.</p></div>
+  <div class="live-note"><span id="live-dot" class="live-dot"></span><span id="live-label">connecting…</span></div>
+  <form id="chat-form" class="chat-form" autocomplete="off">
+    <input id="chat-input" type="text" placeholder="Ask a question…" autocomplete="off" />
+    <button type="submit">Send</button>
+  </form>
+</aside>
+
+<!--
+  Vendored chess.js 0.13.4 (https://github.com/jhlywa/chess.js), BSD-2-Clause,
+  Copyright (c) 2022 Jeff Hlywa (jhlywa@gmail.com). Used here for legal-move
+  generation/validation and lightweight PGN move replay only — no engine
+  analysis of its own (that comes from the client-side Stockfish WASM worker
+  in the main script below); see the explicit chess scope boundary in
+  docs/superpowers/specs/2026-08-16-studio-shell-templates-design.md and
+  docs/superpowers/specs/2026-08-16-chapter-mode-engine-coaching-design.md.
+  The upstream file's top-level `export const`/`export function` declarations
+  are stripped to plain declarations below so this can run as a classic
+  (non-module) inline script and expose `Chess` to the shell script that
+  follows it in this same document. Identical to the copy in board-shell.html.
+-->
+<script>
+/*
+ * Copyright (c) 2022, Jeff Hlywa (jhlywa@gmail.com)
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ *----------------------------------------------------------------------------*/
+
+const SYMBOLS = 'pnbrqkPNBRQK'
+
+const DEFAULT_POSITION =
+  'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
+
+const TERMINATION_MARKERS = ['1-0', '0-1', '1/2-1/2', '*']
+
+const PAWN_OFFSETS = {
+  b: [16, 32, 17, 15],
+  w: [-16, -32, -17, -15],
+}
+
+const PIECE_OFFSETS = {
+  n: [-18, -33, -31, -14, 18, 33, 31, 14],
+  b: [-17, -15, 17, 15],
+  r: [-16, 1, 16, -1],
+  q: [-17, -16, -15, 1, 17, 16, 15, -1],
+  k: [-17, -16, -15, 1, 17, 16, 15, -1],
+}
+
+// prettier-ignore
+const ATTACKS = [
+  20, 0, 0, 0, 0, 0, 0, 24,  0, 0, 0, 0, 0, 0,20, 0,
+   0,20, 0, 0, 0, 0, 0, 24,  0, 0, 0, 0, 0,20, 0, 0,
+   0, 0,20, 0, 0, 0, 0, 24,  0, 0, 0, 0,20, 0, 0, 0,
+   0, 0, 0,20, 0, 0, 0, 24,  0, 0, 0,20, 0, 0, 0, 0,
+   0, 0, 0, 0,20, 0, 0, 24,  0, 0,20, 0, 0, 0, 0, 0,
+   0, 0, 0, 0, 0,20, 2, 24,  2,20, 0, 0, 0, 0, 0, 0,
+   0, 0, 0, 0, 0, 2,53, 56, 53, 2, 0, 0, 0, 0, 0, 0,
+  24,24,24,24,24,24,56,  0, 56,24,24,24,24,24,24, 0,
+   0, 0, 0, 0, 0, 2,53, 56, 53, 2, 0, 0, 0, 0, 0, 0,
+   0, 0, 0, 0, 0,20, 2, 24,  2,20, 0, 0, 0, 0, 0, 0,
+   0, 0, 0, 0,20, 0, 0, 24,  0, 0,20, 0, 0, 0, 0, 0,
+   0, 0, 0,20, 0, 0, 0, 24,  0, 0, 0,20, 0, 0, 0, 0,
+   0, 0,20, 0, 0, 0, 0, 24,  0, 0, 0, 0,20, 0, 0, 0,
+   0,20, 0, 0, 0, 0, 0, 24,  0, 0, 0, 0, 0,20, 0, 0,
+  20, 0, 0, 0, 0, 0, 0, 24,  0, 0, 0, 0, 0, 0,20
+];
+
+// prettier-ignore
+const RAYS = [
+   17,  0,  0,  0,  0,  0,  0, 16,  0,  0,  0,  0,  0,  0, 15, 0,
+    0, 17,  0,  0,  0,  0,  0, 16,  0,  0,  0,  0,  0, 15,  0, 0,
+    0,  0, 17,  0,  0,  0,  0, 16,  0,  0,  0,  0, 15,  0,  0, 0,
+    0,  0,  0, 17,  0,  0,  0, 16,  0,  0,  0, 15,  0,  0,  0, 0,
+    0,  0,  0,  0, 17,  0,  0, 16,  0,  0, 15,  0,  0,  0,  0, 0,
+    0,  0,  0,  0,  0, 17,  0, 16,  0, 15,  0,  0,  0,  0,  0, 0,
+    0,  0,  0,  0,  0,  0, 17, 16, 15,  0,  0,  0,  0,  0,  0, 0,
+    1,  1,  1,  1,  1,  1,  1,  0, -1, -1,  -1,-1, -1, -1, -1, 0,
+    0,  0,  0,  0,  0,  0,-15,-16,-17,  0,  0,  0,  0,  0,  0, 0,
+    0,  0,  0,  0,  0,-15,  0,-16,  0,-17,  0,  0,  0,  0,  0, 0,
+    0,  0,  0,  0,-15,  0,  0,-16,  0,  0,-17,  0,  0,  0,  0, 0,
+    0,  0,  0,-15,  0,  0,  0,-16,  0,  0,  0,-17,  0,  0,  0, 0,
+    0,  0,-15,  0,  0,  0,  0,-16,  0,  0,  0,  0,-17,  0,  0, 0,
+    0,-15,  0,  0,  0,  0,  0,-16,  0,  0,  0,  0,  0,-17,  0, 0,
+  -15,  0,  0,  0,  0,  0,  0,-16,  0,  0,  0,  0,  0,  0,-17
+];
+
+const SHIFTS = { p: 0, n: 1, b: 2, r: 3, q: 4, k: 5 }
+
+const BITS = {
+  NORMAL: 1,
+  CAPTURE: 2,
+  BIG_PAWN: 4,
+  EP_CAPTURE: 8,
+  PROMOTION: 16,
+  KSIDE_CASTLE: 32,
+  QSIDE_CASTLE: 64,
+}
+
+const RANK_1 = 7
+const RANK_2 = 6
+const RANK_3 = 5
+const RANK_4 = 4
+const RANK_5 = 3
+const RANK_6 = 2
+const RANK_7 = 1
+const RANK_8 = 0
+
+// prettier-ignore
+const SQUARE_MAP = {
+  a8:   0, b8:   1, c8:   2, d8:   3, e8:   4, f8:   5, g8:   6, h8:   7,
+  a7:  16, b7:  17, c7:  18, d7:  19, e7:  20, f7:  21, g7:  22, h7:  23,
+  a6:  32, b6:  33, c6:  34, d6:  35, e6:  36, f6:  37, g6:  38, h6:  39,
+  a5:  48, b5:  49, c5:  50, d5:  51, e5:  52, f5:  53, g5:  54, h5:  55,
+  a4:  64, b4:  65, c4:  66, d4:  67, e4:  68, f4:  69, g4:  70, h4:  71,
+  a3:  80, b3:  81, c3:  82, d3:  83, e3:  84, f3:  85, g3:  86, h3:  87,
+  a2:  96, b2:  97, c2:  98, d2:  99, e2: 100, f2: 101, g2: 102, h2: 103,
+  a1: 112, b1: 113, c1: 114, d1: 115, e1: 116, f1: 117, g1: 118, h1: 119
+};
+
+const ROOKS = {
+  w: [
+    { square: SQUARE_MAP.a1, flag: BITS.QSIDE_CASTLE },
+    { square: SQUARE_MAP.h1, flag: BITS.KSIDE_CASTLE },
+  ],
+  b: [
+    { square: SQUARE_MAP.a8, flag: BITS.QSIDE_CASTLE },
+    { square: SQUARE_MAP.h8, flag: BITS.KSIDE_CASTLE },
+  ],
+}
+
+const PARSER_STRICT = 0
+const PARSER_SLOPPY = 1
+
+/* this function is used to uniquely identify ambiguous moves */
+function get_disambiguator(move, moves) {
+  var from = move.from
+  var to = move.to
+  var piece = move.piece
+
+  var ambiguities = 0
+  var same_rank = 0
+  var same_file = 0
+
+  for (var i = 0, len = moves.length; i < len; i++) {
+    var ambig_from = moves[i].from
+    var ambig_to = moves[i].to
+    var ambig_piece = moves[i].piece
+
+    /* if a move of the same piece type ends on the same to square, we'll
+     * need to add a disambiguator to the algebraic notation
+     */
+    if (piece === ambig_piece && from !== ambig_from && to === ambig_to) {
+      ambiguities++
+
+      if (rank(from) === rank(ambig_from)) {
+        same_rank++
+      }
+
+      if (file(from) === file(ambig_from)) {
+        same_file++
+      }
+    }
+  }
+
+  if (ambiguities > 0) {
+    /* if there exists a similar moving piece on the same rank and file as
+     * the move in question, use the square as the disambiguator
+     */
+    if (same_rank > 0 && same_file > 0) {
+      return algebraic(from)
+    } else if (same_file > 0) {
+      /* if the moving piece rests on the same file, use the rank symbol as the
+       * disambiguator
+       */
+      return algebraic(from).charAt(1)
+    } else {
+      /* else use the file symbol */
+      return algebraic(from).charAt(0)
+    }
+  }
+
+  return ''
+}
+
+function infer_piece_type(san) {
+  var piece_type = san.charAt(0)
+  if (piece_type >= 'a' && piece_type <= 'h') {
+    var matches = san.match(/[a-h]\d.*[a-h]\d/)
+    if (matches) {
+      return undefined
+    }
+    return PAWN
+  }
+  piece_type = piece_type.toLowerCase()
+  if (piece_type === 'o') {
+    return KING
+  }
+  return piece_type
+}
+
+// parses all of the decorators out of a SAN string
+function stripped_san(move) {
+  return move.replace(/=/, '').replace(/[+#]?[?!]*$/, '')
+}
+
+/*****************************************************************************
+ * UTILITY FUNCTIONS
+ ****************************************************************************/
+function rank(i) {
+  return i >> 4
+}
+
+function file(i) {
+  return i & 15
+}
+
+function algebraic(i) {
+  var f = file(i),
+    r = rank(i)
+  return 'abcdefgh'.substring(f, f + 1) + '87654321'.substring(r, r + 1)
+}
+
+function swap_color(c) {
+  return c === WHITE ? BLACK : WHITE
+}
+
+function is_digit(c) {
+  return '0123456789'.indexOf(c) !== -1
+}
+
+function clone(obj) {
+  var dupe = obj instanceof Array ? [] : {}
+
+  for (var property in obj) {
+    if (typeof property === 'object') {
+      dupe[property] = clone(obj[property])
+    } else {
+      dupe[property] = obj[property]
+    }
+  }
+
+  return dupe
+}
+
+function trim(str) {
+  return str.replace(/^\s+|\s+$/g, '')
+}
+
+/***************************************************************************
+ * PUBLIC CONSTANTS
+ **************************************************************************/
+
+const BLACK = 'b'
+const WHITE = 'w'
+
+const EMPTY = -1
+
+const PAWN = 'p'
+const KNIGHT = 'n'
+const BISHOP = 'b'
+const ROOK = 'r'
+const QUEEN = 'q'
+const KING = 'k'
+
+const SQUARES = (function () {
+  /* from the ECMA-262 spec (section 12.6.4):
+   * "The mechanics of enumerating the properties ... is
+   * implementation dependent"
+   * so: for (var sq in SQUARES) { keys.push(sq); } might not be
+   * ordered correctly
+   */
+  var keys = []
+  for (var i = SQUARE_MAP.a8; i <= SQUARE_MAP.h1; i++) {
+    if (i & 0x88) {
+      i += 7
+      continue
+    }
+    keys.push(algebraic(i))
+  }
+  return keys
+})()
+
+const FLAGS = {
+  NORMAL: 'n',
+  CAPTURE: 'c',
+  BIG_PAWN: 'b',
+  EP_CAPTURE: 'e',
+  PROMOTION: 'p',
+  KSIDE_CASTLE: 'k',
+  QSIDE_CASTLE: 'q',
+}
+
+const Chess = function (fen) {
+  var board = new Array(128)
+  var kings = { w: EMPTY, b: EMPTY }
+  var turn = WHITE
+  var castling = { w: 0, b: 0 }
+  var ep_square = EMPTY
+  var half_moves = 0
+  var move_number = 1
+  var history = []
+  var header = {}
+  var comments = {}
+
+  /* if the user passes in a fen string, load it, else default to
+   * starting position
+   */
+  if (typeof fen === 'undefined') {
+    load(DEFAULT_POSITION)
+  } else {
+    load(fen)
+  }
+
+  function clear(keep_headers) {
+    if (typeof keep_headers === 'undefined') {
+      keep_headers = false
+    }
+
+    board = new Array(128)
+    kings = { w: EMPTY, b: EMPTY }
+    turn = WHITE
+    castling = { w: 0, b: 0 }
+    ep_square = EMPTY
+    half_moves = 0
+    move_number = 1
+    history = []
+    if (!keep_headers) header = {}
+    comments = {}
+    update_setup(generate_fen())
+  }
+
+  function prune_comments() {
+    var reversed_history = []
+    var current_comments = {}
+    var copy_comment = function (fen) {
+      if (fen in comments) {
+        current_comments[fen] = comments[fen]
+      }
+    }
+    while (history.length > 0) {
+      reversed_history.push(undo_move())
+    }
+    copy_comment(generate_fen())
+    while (reversed_history.length > 0) {
+      make_move(reversed_history.pop())
+      copy_comment(generate_fen())
+    }
+    comments = current_comments
+  }
+
+  function reset() {
+    load(DEFAULT_POSITION)
+  }
+
+  function load(fen, keep_headers) {
+    if (typeof keep_headers === 'undefined') {
+      keep_headers = false
+    }
+
+    var tokens = fen.split(/\s+/)
+    var position = tokens[0]
+    var square = 0
+
+    if (!validate_fen(fen).valid) {
+      return false
+    }
+
+    clear(keep_headers)
+
+    for (var i = 0; i < position.length; i++) {
+      var piece = position.charAt(i)
+
+      if (piece === '/') {
+        square += 8
+      } else if (is_digit(piece)) {
+        square += parseInt(piece, 10)
+      } else {
+        var color = piece < 'a' ? WHITE : BLACK
+        put({ type: piece.toLowerCase(), color: color }, algebraic(square))
+        square++
+      }
+    }
+
+    turn = tokens[1]
+
+    if (tokens[2].indexOf('K') > -1) {
+      castling.w |= BITS.KSIDE_CASTLE
+    }
+    if (tokens[2].indexOf('Q') > -1) {
+      castling.w |= BITS.QSIDE_CASTLE
+    }
+    if (tokens[2].indexOf('k') > -1) {
+      castling.b |= BITS.KSIDE_CASTLE
+    }
+    if (tokens[2].indexOf('q') > -1) {
+      castling.b |= BITS.QSIDE_CASTLE
+    }
+
+    ep_square = tokens[3] === '-' ? EMPTY : SQUARE_MAP[tokens[3]]
+    half_moves = parseInt(tokens[4], 10)
+    move_number = parseInt(tokens[5], 10)
+
+    update_setup(generate_fen())
+
+    return true
+  }
+
+  /* TODO: this function is pretty much crap - it validates structure but
+   * completely ignores content (e.g. doesn't verify that each side has a king)
+   * ... we should rewrite this, and ditch the silly error_number field while
+   * we're at it
+   */
+  function validate_fen(fen) {
+    var errors = {
+      0: 'No errors.',
+      1: 'FEN string must contain six space-delimited fields.',
+      2: '6th field (move number) must be a positive integer.',
+      3: '5th field (half move counter) must be a non-negative integer.',
+      4: '4th field (en-passant square) is invalid.',
+      5: '3rd field (castling availability) is invalid.',
+      6: '2nd field (side to move) is invalid.',
+      7: "1st field (piece positions) does not contain 8 '/'-delimited rows.",
+      8: '1st field (piece positions) is invalid [consecutive numbers].',
+      9: '1st field (piece positions) is invalid [invalid piece].',
+      10: '1st field (piece positions) is invalid [row too large].',
+      11: 'Illegal en-passant square',
+    }
+
+    /* 1st criterion: 6 space-seperated fields? */
+    var tokens = fen.split(/\s+/)
+    if (tokens.length !== 6) {
+      return { valid: false, error_number: 1, error: errors[1] }
+    }
+
+    /* 2nd criterion: move number field is a integer value > 0? */
+    if (isNaN(parseInt(tokens[5])) || parseInt(tokens[5], 10) <= 0) {
+      return { valid: false, error_number: 2, error: errors[2] }
+    }
+
+    /* 3rd criterion: half move counter is an integer >= 0? */
+    if (isNaN(parseInt(tokens[4])) || parseInt(tokens[4], 10) < 0) {
+      return { valid: false, error_number: 3, error: errors[3] }
+    }
+
+    /* 4th criterion: 4th field is a valid e.p.-string? */
+    if (!/^(-|[abcdefgh][36])$/.test(tokens[3])) {
+      return { valid: false, error_number: 4, error: errors[4] }
+    }
+
+    /* 5th criterion: 3th field is a valid castle-string? */
+    if (!/^(KQ?k?q?|Qk?q?|kq?|q|-)$/.test(tokens[2])) {
+      return { valid: false, error_number: 5, error: errors[5] }
+    }
+
+    /* 6th criterion: 2nd field is "w" (white) or "b" (black)? */
+    if (!/^(w|b)$/.test(tokens[1])) {
+      return { valid: false, error_number: 6, error: errors[6] }
+    }
+
+    /* 7th criterion: 1st field contains 8 rows? */
+    var rows = tokens[0].split('/')
+    if (rows.length !== 8) {
+      return { valid: false, error_number: 7, error: errors[7] }
+    }
+
+    /* 8th criterion: every row is valid? */
+    for (var i = 0; i < rows.length; i++) {
+      /* check for right sum of fields AND not two numbers in succession */
+      var sum_fields = 0
+      var previous_was_number = false
+
+      for (var k = 0; k < rows[i].length; k++) {
+        if (!isNaN(rows[i][k])) {
+          if (previous_was_number) {
+            return { valid: false, error_number: 8, error: errors[8] }
+          }
+          sum_fields += parseInt(rows[i][k], 10)
+          previous_was_number = true
+        } else {
+          if (!/^[prnbqkPRNBQK]$/.test(rows[i][k])) {
+            return { valid: false, error_number: 9, error: errors[9] }
+          }
+          sum_fields += 1
+          previous_was_number = false
+        }
+      }
+      if (sum_fields !== 8) {
+        return { valid: false, error_number: 10, error: errors[10] }
+      }
+    }
+
+    if (
+      (tokens[3][1] == '3' && tokens[1] == 'w') ||
+      (tokens[3][1] == '6' && tokens[1] == 'b')
+    ) {
+      return { valid: false, error_number: 11, error: errors[11] }
+    }
+
+    /* everything's okay! */
+    return { valid: true, error_number: 0, error: errors[0] }
+  }
+
+  function generate_fen() {
+    var empty = 0
+    var fen = ''
+
+    for (var i = SQUARE_MAP.a8; i <= SQUARE_MAP.h1; i++) {
+      if (board[i] == null) {
+        empty++
+      } else {
+        if (empty > 0) {
+          fen += empty
+          empty = 0
+        }
+        var color = board[i].color
+        var piece = board[i].type
+
+        fen += color === WHITE ? piece.toUpperCase() : piece.toLowerCase()
+      }
+
+      if ((i + 1) & 0x88) {
+        if (empty > 0) {
+          fen += empty
+        }
+
+        if (i !== SQUARE_MAP.h1) {
+          fen += '/'
+        }
+
+        empty = 0
+        i += 8
+      }
+    }
+
+    var cflags = ''
+    if (castling[WHITE] & BITS.KSIDE_CASTLE) {
+      cflags += 'K'
+    }
+    if (castling[WHITE] & BITS.QSIDE_CASTLE) {
+      cflags += 'Q'
+    }
+    if (castling[BLACK] & BITS.KSIDE_CASTLE) {
+      cflags += 'k'
+    }
+    if (castling[BLACK] & BITS.QSIDE_CASTLE) {
+      cflags += 'q'
+    }
+
+    /* do we have an empty castling flag? */
+    cflags = cflags || '-'
+    var epflags = ep_square === EMPTY ? '-' : algebraic(ep_square)
+
+    return [fen, turn, cflags, epflags, half_moves, move_number].join(' ')
+  }
+
+  function set_header(args) {
+    for (var i = 0; i < args.length; i += 2) {
+      if (typeof args[i] === 'string' && typeof args[i + 1] === 'string') {
+        header[args[i]] = args[i + 1]
+      }
+    }
+    return header
+  }
+
+  /* called when the initial board setup is changed with put() or remove().
+   * modifies the SetUp and FEN properties of the header object.  if the FEN is
+   * equal to the default position, the SetUp and FEN are deleted
+   * the setup is only updated if history.length is zero, ie moves haven't been
+   * made.
+   */
+  function update_setup(fen) {
+    if (history.length > 0) return
+
+    if (fen !== DEFAULT_POSITION) {
+      header['SetUp'] = '1'
+      header['FEN'] = fen
+    } else {
+      delete header['SetUp']
+      delete header['FEN']
+    }
+  }
+
+  function get(square) {
+    var piece = board[SQUARE_MAP[square]]
+    return piece ? { type: piece.type, color: piece.color } : null
+  }
+
+  function put(piece, square) {
+    /* check for valid piece object */
+    if (!('type' in piece && 'color' in piece)) {
+      return false
+    }
+
+    /* check for piece */
+    if (SYMBOLS.indexOf(piece.type.toLowerCase()) === -1) {
+      return false
+    }
+
+    /* check for valid square */
+    if (!(square in SQUARE_MAP)) {
+      return false
+    }
+
+    var sq = SQUARE_MAP[square]
+
+    /* don't let the user place more than one king */
+    if (
+      piece.type == KING &&
+      !(kings[piece.color] == EMPTY || kings[piece.color] == sq)
+    ) {
+      return false
+    }
+
+    board[sq] = { type: piece.type, color: piece.color }
+    if (piece.type === KING) {
+      kings[piece.color] = sq
+    }
+
+    update_setup(generate_fen())
+
+    return true
+  }
+
+  function remove(square) {
+    var piece = get(square)
+    board[SQUARE_MAP[square]] = null
+    if (piece && piece.type === KING) {
+      kings[piece.color] = EMPTY
+    }
+
+    update_setup(generate_fen())
+
+    return piece
+  }
+
+  function build_move(board, from, to, flags, promotion) {
+    var move = {
+      color: turn,
+      from: from,
+      to: to,
+      flags: flags,
+      piece: board[from].type,
+    }
+
+    if (promotion) {
+      move.flags |= BITS.PROMOTION
+      move.promotion = promotion
+    }
+
+    if (board[to]) {
+      move.captured = board[to].type
+    } else if (flags & BITS.EP_CAPTURE) {
+      move.captured = PAWN
+    }
+    return move
+  }
+
+  function generate_moves(options) {
+    function add_move(board, moves, from, to, flags) {
+      /* if pawn promotion */
+      if (
+        board[from].type === PAWN &&
+        (rank(to) === RANK_8 || rank(to) === RANK_1)
+      ) {
+        var pieces = [QUEEN, ROOK, BISHOP, KNIGHT]
+        for (var i = 0, len = pieces.length; i < len; i++) {
+          moves.push(build_move(board, from, to, flags, pieces[i]))
+        }
+      } else {
+        moves.push(build_move(board, from, to, flags))
+      }
+    }
+
+    var moves = []
+    var us = turn
+    var them = swap_color(us)
+    var second_rank = { b: RANK_7, w: RANK_2 }
+
+    var first_sq = SQUARE_MAP.a8
+    var last_sq = SQUARE_MAP.h1
+    var single_square = false
+
+    /* do we want legal moves? */
+    var legal =
+      typeof options !== 'undefined' && 'legal' in options
+        ? options.legal
+        : true
+
+    var piece_type =
+      typeof options !== 'undefined' &&
+      'piece' in options &&
+      typeof options.piece === 'string'
+        ? options.piece.toLowerCase()
+        : true
+
+    /* are we generating moves for a single square? */
+    if (typeof options !== 'undefined' && 'square' in options) {
+      if (options.square in SQUARE_MAP) {
+        first_sq = last_sq = SQUARE_MAP[options.square]
+        single_square = true
+      } else {
+        /* invalid square */
+        return []
+      }
+    }
+
+    for (var i = first_sq; i <= last_sq; i++) {
+      /* did we run off the end of the board */
+      if (i & 0x88) {
+        i += 7
+        continue
+      }
+
+      var piece = board[i]
+      if (piece == null || piece.color !== us) {
+        continue
+      }
+
+      if (piece.type === PAWN && (piece_type === true || piece_type === PAWN)) {
+        /* single square, non-capturing */
+        var square = i + PAWN_OFFSETS[us][0]
+        if (board[square] == null) {
+          add_move(board, moves, i, square, BITS.NORMAL)
+
+          /* double square */
+          var square = i + PAWN_OFFSETS[us][1]
+          if (second_rank[us] === rank(i) && board[square] == null) {
+            add_move(board, moves, i, square, BITS.BIG_PAWN)
+          }
+        }
+
+        /* pawn captures */
+        for (j = 2; j < 4; j++) {
+          var square = i + PAWN_OFFSETS[us][j]
+          if (square & 0x88) continue
+
+          if (board[square] != null && board[square].color === them) {
+            add_move(board, moves, i, square, BITS.CAPTURE)
+          } else if (square === ep_square) {
+            add_move(board, moves, i, ep_square, BITS.EP_CAPTURE)
+          }
+        }
+      } else if (piece_type === true || piece_type === piece.type) {
+        for (var j = 0, len = PIECE_OFFSETS[piece.type].length; j < len; j++) {
+          var offset = PIECE_OFFSETS[piece.type][j]
+          var square = i
+
+          while (true) {
+            square += offset
+            if (square & 0x88) break
+
+            if (board[square] == null) {
+              add_move(board, moves, i, square, BITS.NORMAL)
+            } else {
+              if (board[square].color === us) break
+              add_move(board, moves, i, square, BITS.CAPTURE)
+              break
+            }
+
+            /* break, if knight or king */
+            if (piece.type === 'n' || piece.type === 'k') break
+          }
+        }
+      }
+    }
+
+    /* check for castling if: a) we're generating all moves, or b) we're doing
+     * single square move generation on the king's square
+     */
+    if (piece_type === true || piece_type === KING) {
+      if (!single_square || last_sq === kings[us]) {
+        /* king-side castling */
+        if (castling[us] & BITS.KSIDE_CASTLE) {
+          var castling_from = kings[us]
+          var castling_to = castling_from + 2
+
+          if (
+            board[castling_from + 1] == null &&
+            board[castling_to] == null &&
+            !attacked(them, kings[us]) &&
+            !attacked(them, castling_from + 1) &&
+            !attacked(them, castling_to)
+          ) {
+            add_move(board, moves, kings[us], castling_to, BITS.KSIDE_CASTLE)
+          }
+        }
+
+        /* queen-side castling */
+        if (castling[us] & BITS.QSIDE_CASTLE) {
+          var castling_from = kings[us]
+          var castling_to = castling_from - 2
+
+          if (
+            board[castling_from - 1] == null &&
+            board[castling_from - 2] == null &&
+            board[castling_from - 3] == null &&
+            !attacked(them, kings[us]) &&
+            !attacked(them, castling_from - 1) &&
+            !attacked(them, castling_to)
+          ) {
+            add_move(board, moves, kings[us], castling_to, BITS.QSIDE_CASTLE)
+          }
+        }
+      }
+    }
+
+    /* return all pseudo-legal moves (this includes moves that allow the king
+     * to be captured)
+     */
+    if (!legal) {
+      return moves
+    }
+
+    /* filter out illegal moves */
+    var legal_moves = []
+    for (var i = 0, len = moves.length; i < len; i++) {
+      make_move(moves[i])
+      if (!king_attacked(us)) {
+        legal_moves.push(moves[i])
+      }
+      undo_move()
+    }
+
+    return legal_moves
+  }
+
+  /* convert a move from 0x88 coordinates to Standard Algebraic Notation
+   * (SAN)
+   *
+   * @param {boolean} sloppy Use the sloppy SAN generator to work around over
+   * disambiguation bugs in Fritz and Chessbase.  See below:
+   *
+   * r1bqkbnr/ppp2ppp/2n5/1B1pP3/4P3/8/PPPP2PP/RNBQK1NR b KQkq - 2 4
+   * 4. ... Nge7 is overly disambiguated because the knight on c6 is pinned
+   * 4. ... Ne7 is technically the valid SAN
+   */
+  function move_to_san(move, moves) {
+    var output = ''
+
+    if (move.flags & BITS.KSIDE_CASTLE) {
+      output = 'O-O'
+    } else if (move.flags & BITS.QSIDE_CASTLE) {
+      output = 'O-O-O'
+    } else {
+      if (move.piece !== PAWN) {
+        var disambiguator = get_disambiguator(move, moves)
+        output += move.piece.toUpperCase() + disambiguator
+      }
+
+      if (move.flags & (BITS.CAPTURE | BITS.EP_CAPTURE)) {
+        if (move.piece === PAWN) {
+          output += algebraic(move.from)[0]
+        }
+        output += 'x'
+      }
+
+      output += algebraic(move.to)
+
+      if (move.flags & BITS.PROMOTION) {
+        output += '=' + move.promotion.toUpperCase()
+      }
+    }
+
+    make_move(move)
+    if (in_check()) {
+      if (in_checkmate()) {
+        output += '#'
+      } else {
+        output += '+'
+      }
+    }
+    undo_move()
+
+    return output
+  }
+
+  function attacked(color, square) {
+    for (var i = SQUARE_MAP.a8; i <= SQUARE_MAP.h1; i++) {
+      /* did we run off the end of the board */
+      if (i & 0x88) {
+        i += 7
+        continue
+      }
+
+      /* if empty square or wrong color */
+      if (board[i] == null || board[i].color !== color) continue
+
+      var piece = board[i]
+      var difference = i - square
+      var index = difference + 119
+
+      if (ATTACKS[index] & (1 << SHIFTS[piece.type])) {
+        if (piece.type === PAWN) {
+          if (difference > 0) {
+            if (piece.color === WHITE) return true
+          } else {
+            if (piece.color === BLACK) return true
+          }
+          continue
+        }
+
+        /* if the piece is a knight or a king */
+        if (piece.type === 'n' || piece.type === 'k') return true
+
+        var offset = RAYS[index]
+        var j = i + offset
+
+        var blocked = false
+        while (j !== square) {
+          if (board[j] != null) {
+            blocked = true
+            break
+          }
+          j += offset
+        }
+
+        if (!blocked) return true
+      }
+    }
+
+    return false
+  }
+
+  function king_attacked(color) {
+    return attacked(swap_color(color), kings[color])
+  }
+
+  function in_check() {
+    return king_attacked(turn)
+  }
+
+  function in_checkmate() {
+    return in_check() && generate_moves().length === 0
+  }
+
+  function in_stalemate() {
+    return !in_check() && generate_moves().length === 0
+  }
+
+  function insufficient_material() {
+    var pieces = {}
+    var bishops = []
+    var num_pieces = 0
+    var sq_color = 0
+
+    for (var i = SQUARE_MAP.a8; i <= SQUARE_MAP.h1; i++) {
+      sq_color = (sq_color + 1) % 2
+      if (i & 0x88) {
+        i += 7
+        continue
+      }
+
+      var piece = board[i]
+      if (piece) {
+        pieces[piece.type] = piece.type in pieces ? pieces[piece.type] + 1 : 1
+        if (piece.type === BISHOP) {
+          bishops.push(sq_color)
+        }
+        num_pieces++
+      }
+    }
+
+    /* k vs. k */
+    if (num_pieces === 2) {
+      return true
+    } else if (
+      /* k vs. kn .... or .... k vs. kb */
+      num_pieces === 3 &&
+      (pieces[BISHOP] === 1 || pieces[KNIGHT] === 1)
+    ) {
+      return true
+    } else if (num_pieces === pieces[BISHOP] + 2) {
+      /* kb vs. kb where any number of bishops are all on the same color */
+      var sum = 0
+      var len = bishops.length
+      for (var i = 0; i < len; i++) {
+        sum += bishops[i]
+      }
+      if (sum === 0 || sum === len) {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  function in_threefold_repetition() {
+    /* TODO: while this function is fine for casual use, a better
+     * implementation would use a Zobrist key (instead of FEN). the
+     * Zobrist key would be maintained in the make_move/undo_move functions,
+     * avoiding the costly that we do below.
+     */
+    var moves = []
+    var positions = {}
+    var repetition = false
+
+    while (true) {
+      var move = undo_move()
+      if (!move) break
+      moves.push(move)
+    }
+
+    while (true) {
+      /* remove the last two fields in the FEN string, they're not needed
+       * when checking for draw by rep */
+      var fen = generate_fen().split(' ').slice(0, 4).join(' ')
+
+      /* has the position occurred three or move times */
+      positions[fen] = fen in positions ? positions[fen] + 1 : 1
+      if (positions[fen] >= 3) {
+        repetition = true
+      }
+
+      if (!moves.length) {
+        break
+      }
+      make_move(moves.pop())
+    }
+
+    return repetition
+  }
+
+  function push(move) {
+    history.push({
+      move: move,
+      kings: { b: kings.b, w: kings.w },
+      turn: turn,
+      castling: { b: castling.b, w: castling.w },
+      ep_square: ep_square,
+      half_moves: half_moves,
+      move_number: move_number,
+    })
+  }
+
+  function make_move(move) {
+    var us = turn
+    var them = swap_color(us)
+    push(move)
+
+    board[move.to] = board[move.from]
+    board[move.from] = null
+
+    /* if ep capture, remove the captured pawn */
+    if (move.flags & BITS.EP_CAPTURE) {
+      if (turn === BLACK) {
+        board[move.to - 16] = null
+      } else {
+        board[move.to + 16] = null
+      }
+    }
+
+    /* if pawn promotion, replace with new piece */
+    if (move.flags & BITS.PROMOTION) {
+      board[move.to] = { type: move.promotion, color: us }
+    }
+
+    /* if we moved the king */
+    if (board[move.to].type === KING) {
+      kings[board[move.to].color] = move.to
+
+      /* if we castled, move the rook next to the king */
+      if (move.flags & BITS.KSIDE_CASTLE) {
+        var castling_to = move.to - 1
+        var castling_from = move.to + 1
+        board[castling_to] = board[castling_from]
+        board[castling_from] = null
+      } else if (move.flags & BITS.QSIDE_CASTLE) {
+        var castling_to = move.to + 1
+        var castling_from = move.to - 2
+        board[castling_to] = board[castling_from]
+        board[castling_from] = null
+      }
+
+      /* turn off castling */
+      castling[us] = ''
+    }
+
+    /* turn off castling if we move a rook */
+    if (castling[us]) {
+      for (var i = 0, len = ROOKS[us].length; i < len; i++) {
+        if (
+          move.from === ROOKS[us][i].square &&
+          castling[us] & ROOKS[us][i].flag
+        ) {
+          castling[us] ^= ROOKS[us][i].flag
+          break
+        }
+      }
+    }
+
+    /* turn off castling if we capture a rook */
+    if (castling[them]) {
+      for (var i = 0, len = ROOKS[them].length; i < len; i++) {
+        if (
+          move.to === ROOKS[them][i].square &&
+          castling[them] & ROOKS[them][i].flag
+        ) {
+          castling[them] ^= ROOKS[them][i].flag
+          break
+        }
+      }
+    }
+
+    /* if big pawn move, update the en passant square */
+    if (move.flags & BITS.BIG_PAWN) {
+      if (turn === 'b') {
+        ep_square = move.to - 16
+      } else {
+        ep_square = move.to + 16
+      }
+    } else {
+      ep_square = EMPTY
+    }
+
+    /* reset the 50 move counter if a pawn is moved or a piece is captured */
+    if (move.piece === PAWN) {
+      half_moves = 0
+    } else if (move.flags & (BITS.CAPTURE | BITS.EP_CAPTURE)) {
+      half_moves = 0
+    } else {
+      half_moves++
+    }
+
+    if (turn === BLACK) {
+      move_number++
+    }
+    turn = swap_color(turn)
+  }
+
+  function undo_move() {
+    var old = history.pop()
+    if (old == null) {
+      return null
+    }
+
+    var move = old.move
+    kings = old.kings
+    turn = old.turn
+    castling = old.castling
+    ep_square = old.ep_square
+    half_moves = old.half_moves
+    move_number = old.move_number
+
+    var us = turn
+    var them = swap_color(turn)
+
+    board[move.from] = board[move.to]
+    board[move.from].type = move.piece // to undo any promotions
+    board[move.to] = null
+
+    if (move.flags & BITS.CAPTURE) {
+      board[move.to] = { type: move.captured, color: them }
+    } else if (move.flags & BITS.EP_CAPTURE) {
+      var index
+      if (us === BLACK) {
+        index = move.to - 16
+      } else {
+        index = move.to + 16
+      }
+      board[index] = { type: PAWN, color: them }
+    }
+
+    if (move.flags & (BITS.KSIDE_CASTLE | BITS.QSIDE_CASTLE)) {
+      var castling_to, castling_from
+      if (move.flags & BITS.KSIDE_CASTLE) {
+        castling_to = move.to + 1
+        castling_from = move.to - 1
+      } else if (move.flags & BITS.QSIDE_CASTLE) {
+        castling_to = move.to - 2
+        castling_from = move.to + 1
+      }
+
+      board[castling_to] = board[castling_from]
+      board[castling_from] = null
+    }
+
+    return move
+  }
+
+  // convert a move from Standard Algebraic Notation (SAN) to 0x88 coordinates
+  function move_from_san(move, sloppy) {
+    // strip off any move decorations: e.g Nf3+?! becomes Nf3
+    var clean_move = stripped_san(move)
+
+    // the move parsers is a 2-step state
+    for (var parser = 0; parser < 2; parser++) {
+      if (parser == PARSER_SLOPPY) {
+        // only run the sloppy parse if explicitly requested
+        if (!sloppy) {
+          return null
+        }
+
+        // The sloppy parser allows the user to parse non-standard chess
+        // notations. This parser is opt-in (by specifying the
+        // '{ sloppy: true }' setting) and is only run after the Standard
+        // Algebraic Notation (SAN) parser has failed.
+        //
+        // When running the sloppy parser, we'll run a regex to grab the piece,
+        // the to/from square, and an optional promotion piece. This regex will
+        // parse common non-standard notation like: Pe2-e4, Rc1c4, Qf3xf7,
+        // f7f8q, b1c3
+
+        // NOTE: Some positions and moves may be ambiguous when using the
+        // sloppy parser. For example, in this position:
+        // 6k1/8/8/B7/8/8/8/BN4K1 w - - 0 1, the move b1c3 may be interpreted
+        // as Nc3 or B1c3 (a disambiguated bishop move). In these cases, the
+        // sloppy parser will default to the most most basic interpretation
+        // (which is b1c3 parsing to Nc3).
+
+        // FIXME: these var's are hoisted into function scope, this will need
+        // to change when switching to const/let
+
+        var overly_disambiguated = false
+
+        var matches = clean_move.match(
+          /([pnbrqkPNBRQK])?([a-h][1-8])x?-?([a-h][1-8])([qrbnQRBN])?/
+        )
+        if (matches) {
+          var piece = matches[1]
+          var from = matches[2]
+          var to = matches[3]
+          var promotion = matches[4]
+
+          if (from.length == 1) {
+            overly_disambiguated = true
+          }
+        } else {
+          // The [a-h]?[1-8]? portion of the regex below handles moves that may
+          // be overly disambiguated (e.g. Nge7 is unnecessary and non-standard
+          // when there is one legal knight move to e7). In this case, the value
+          // of 'from' variable will be a rank or file, not a square.
+          var matches = clean_move.match(
+            /([pnbrqkPNBRQK])?([a-h]?[1-8]?)x?-?([a-h][1-8])([qrbnQRBN])?/
+          )
+
+          if (matches) {
+            var piece = matches[1]
+            var from = matches[2]
+            var to = matches[3]
+            var promotion = matches[4]
+
+            if (from.length == 1) {
+              var overly_disambiguated = true
+            }
+          }
+        }
+      }
+
+      var piece_type = infer_piece_type(clean_move)
+      var moves = generate_moves({
+        legal: true,
+        piece: piece ? piece : piece_type,
+      })
+
+      for (var i = 0, len = moves.length; i < len; i++) {
+        switch (parser) {
+          case PARSER_STRICT: {
+            if (clean_move === stripped_san(move_to_san(moves[i], moves))) {
+              return moves[i]
+            }
+            break
+          }
+          case PARSER_SLOPPY: {
+            if (matches) {
+              // hand-compare move properties with the results from our sloppy
+              // regex
+              if (
+                (!piece || piece.toLowerCase() == moves[i].piece) &&
+                SQUARE_MAP[from] == moves[i].from &&
+                SQUARE_MAP[to] == moves[i].to &&
+                (!promotion || promotion.toLowerCase() == moves[i].promotion)
+              ) {
+                return moves[i]
+              } else if (overly_disambiguated) {
+                // SPECIAL CASE: we parsed a move string that may have an
+                // unneeded rank/file disambiguator (e.g. Nge7).  The 'from'
+                // variable will
+                var square = algebraic(moves[i].from)
+                if (
+                  (!piece || piece.toLowerCase() == moves[i].piece) &&
+                  SQUARE_MAP[to] == moves[i].to &&
+                  (from == square[0] || from == square[1]) &&
+                  (!promotion || promotion.toLowerCase() == moves[i].promotion)
+                ) {
+                  return moves[i]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return null
+  }
+
+  /* pretty = external move object */
+  function make_pretty(ugly_move) {
+    var move = clone(ugly_move)
+    move.san = move_to_san(move, generate_moves({ legal: true }))
+    move.to = algebraic(move.to)
+    move.from = algebraic(move.from)
+
+    var flags = ''
+
+    for (var flag in BITS) {
+      if (BITS[flag] & move.flags) {
+        flags += FLAGS[flag]
+      }
+    }
+    move.flags = flags
+
+    return move
+  }
+
+  /*****************************************************************************
+   * DEBUGGING UTILITIES
+   ****************************************************************************/
+  function perft(depth) {
+    var moves = generate_moves({ legal: false })
+    var nodes = 0
+    var color = turn
+
+    for (var i = 0, len = moves.length; i < len; i++) {
+      make_move(moves[i])
+      if (!king_attacked(color)) {
+        if (depth - 1 > 0) {
+          var child_nodes = perft(depth - 1)
+          nodes += child_nodes
+        } else {
+          nodes++
+        }
+      }
+      undo_move()
+    }
+
+    return nodes
+  }
+
+  return {
+    /***************************************************************************
+     * PUBLIC API
+     **************************************************************************/
+    load: function (fen) {
+      return load(fen)
+    },
+
+    reset: function () {
+      return reset()
+    },
+
+    moves: function (options) {
+      /* The internal representation of a chess move is in 0x88 format, and
+       * not meant to be human-readable.  The code below converts the 0x88
+       * square coordinates to algebraic coordinates.  It also prunes an
+       * unnecessary move keys resulting from a verbose call.
+       */
+
+      var ugly_moves = generate_moves(options)
+      var moves = []
+
+      for (var i = 0, len = ugly_moves.length; i < len; i++) {
+        /* does the user want a full move object (most likely not), or just
+         * SAN
+         */
+        if (
+          typeof options !== 'undefined' &&
+          'verbose' in options &&
+          options.verbose
+        ) {
+          moves.push(make_pretty(ugly_moves[i]))
+        } else {
+          moves.push(
+            move_to_san(ugly_moves[i], generate_moves({ legal: true }))
+          )
+        }
+      }
+
+      return moves
+    },
+
+    in_check: function () {
+      return in_check()
+    },
+
+    in_checkmate: function () {
+      return in_checkmate()
+    },
+
+    in_stalemate: function () {
+      return in_stalemate()
+    },
+
+    in_draw: function () {
+      return (
+        half_moves >= 100 ||
+        in_stalemate() ||
+        insufficient_material() ||
+        in_threefold_repetition()
+      )
+    },
+
+    insufficient_material: function () {
+      return insufficient_material()
+    },
+
+    in_threefold_repetition: function () {
+      return in_threefold_repetition()
+    },
+
+    game_over: function () {
+      return (
+        half_moves >= 100 ||
+        in_checkmate() ||
+        in_stalemate() ||
+        insufficient_material() ||
+        in_threefold_repetition()
+      )
+    },
+
+    validate_fen: function (fen) {
+      return validate_fen(fen)
+    },
+
+    fen: function () {
+      return generate_fen()
+    },
+
+    board: function () {
+      var output = [],
+        row = []
+
+      for (var i = SQUARE_MAP.a8; i <= SQUARE_MAP.h1; i++) {
+        if (board[i] == null) {
+          row.push(null)
+        } else {
+          row.push({
+            square: algebraic(i),
+            type: board[i].type,
+            color: board[i].color,
+          })
+        }
+        if ((i + 1) & 0x88) {
+          output.push(row)
+          row = []
+          i += 8
+        }
+      }
+
+      return output
+    },
+
+    header: function () {
+      return set_header(arguments)
+    },
+
+    turn: function () {
+      return turn
+    },
+
+    move: function (move, options) {
+      /* The move function can be called with in the following parameters:
+       *
+       * .move('Nxb7')      <- where 'move' is a case-sensitive SAN string
+       *
+       * .move({ from: 'h7', <- where the 'move' is a move object (additional
+       *         to :'h8',      fields are ignored)
+       *         promotion: 'q',
+       *      })
+       */
+
+      // allow the user to specify the sloppy move parser to work around over
+      // disambiguation bugs in Fritz and Chessbase
+      var sloppy =
+        typeof options !== 'undefined' && 'sloppy' in options
+          ? options.sloppy
+          : false
+
+      var move_obj = null
+
+      if (typeof move === 'string') {
+        move_obj = move_from_san(move, sloppy)
+      } else if (typeof move === 'object') {
+        var moves = generate_moves()
+
+        /* convert the pretty move object to an ugly move object */
+        for (var i = 0, len = moves.length; i < len; i++) {
+          if (
+            move.from === algebraic(moves[i].from) &&
+            move.to === algebraic(moves[i].to) &&
+            (!('promotion' in moves[i]) ||
+              move.promotion === moves[i].promotion)
+          ) {
+            move_obj = moves[i]
+            break
+          }
+        }
+      }
+
+      /* failed to find move */
+      if (!move_obj) {
+        return null
+      }
+
+      /* need to make a copy of move because we can't generate SAN after the
+       * move is made
+       */
+      var pretty_move = make_pretty(move_obj)
+
+      make_move(move_obj)
+
+      return pretty_move
+    },
+
+    undo: function () {
+      var move = undo_move()
+      return move ? make_pretty(move) : null
+    },
+
+    clear: function () {
+      return clear()
+    },
+
+    put: function (piece, square) {
+      return put(piece, square)
+    },
+
+    get: function (square) {
+      return get(square)
+    },
+
+    ascii() {
+      var s = '   +------------------------+\n'
+      for (var i = SQUARE_MAP.a8; i <= SQUARE_MAP.h1; i++) {
+        /* display the rank */
+        if (file(i) === 0) {
+          s += ' ' + '87654321'[rank(i)] + ' |'
+        }
+
+        /* empty piece */
+        if (board[i] == null) {
+          s += ' . '
+        } else {
+          var piece = board[i].type
+          var color = board[i].color
+          var symbol =
+            color === WHITE ? piece.toUpperCase() : piece.toLowerCase()
+          s += ' ' + symbol + ' '
+        }
+
+        if ((i + 1) & 0x88) {
+          s += '|\n'
+          i += 8
+        }
+      }
+      s += '   +------------------------+\n'
+      s += '     a  b  c  d  e  f  g  h'
+
+      return s
+    },
+
+    remove: function (square) {
+      return remove(square)
+    },
+
+    perft: function (depth) {
+      return perft(depth)
+    },
+
+    square_color: function (square) {
+      if (square in SQUARE_MAP) {
+        var sq_0x88 = SQUARE_MAP[square]
+        return (rank(sq_0x88) + file(sq_0x88)) % 2 === 0 ? 'light' : 'dark'
+      }
+
+      return null
+    },
+
+    history: function (options) {
+      var reversed_history = []
+      var move_history = []
+      var verbose =
+        typeof options !== 'undefined' &&
+        'verbose' in options &&
+        options.verbose
+
+      while (history.length > 0) {
+        reversed_history.push(undo_move())
+      }
+
+      while (reversed_history.length > 0) {
+        var move = reversed_history.pop()
+        if (verbose) {
+          move_history.push(make_pretty(move))
+        } else {
+          move_history.push(move_to_san(move, generate_moves({ legal: true })))
+        }
+        make_move(move)
+      }
+
+      return move_history
+    },
+  }
+}
+</script>
+
+<script>
+(function () {
+  'use strict';
+
+  // =====================================================================
+  // Utilities: escaping, safe markdown-subset renderer, eval formatting
+  // =====================================================================
+
+  function escapeHtml(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function escapeText(node, text) {
+    node.textContent = text == null ? '' : String(text);
+  }
+
+  // Renders a small, injection-safe markdown subset: ## / ### headings,
+  // **bold**, _italic_, `code`, - bullet lists, 1. ordered lists, blank-line
+  // paragraphs, [text](url) links (http/https/mailto only). The source is
+  // HTML-escaped FIRST, then a handful of regexes turn the escaped text into
+  // real tags — so no HTML ever reaches innerHTML except tags this function
+  // itself introduced. Never feed this function already-HTML content.
+  function renderInlineMarkdown(escaped) {
+    var out = escaped;
+    out = out.replace(/`([^`]+)`/g, function (m, code) { return '<code>' + code + '</code>'; });
+    out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g, function (m, txt, url) {
+      return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + txt + '</a>';
+    });
+    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    out = out.replace(/(^|[^\w])_([^_]+)_(?!\w)/g, '$1<em>$2</em>');
+    return out;
+  }
+
+  function renderMarkdown(src) {
+    var escaped = escapeHtml(src);
+    var lines = escaped.split(/\r?\n/);
+    var html = '';
+    var listBuffer = null; // { type: 'ul'|'ol', items: [] }
+    var paraBuffer = [];
+
+    function flushList() {
+      if (!listBuffer) return;
+      var tag = listBuffer.type;
+      html += '<' + tag + '>' + listBuffer.items.map(function (it) {
+        return '<li>' + renderInlineMarkdown(it) + '</li>';
+      }).join('') + '</' + tag + '>';
+      listBuffer = null;
+    }
+    function flushPara() {
+      if (paraBuffer.length) {
+        html += '<p>' + renderInlineMarkdown(paraBuffer.join(' ')) + '</p>';
+        paraBuffer = [];
+      }
+    }
+
+    for (var i = 0; i < lines.length; i++) {
+      var trimmed = lines[i].trim();
+      if (!trimmed) { flushPara(); flushList(); continue; }
+      var m;
+      if ((m = trimmed.match(/^###\s+(.*)$/))) { flushPara(); flushList(); html += '<h3>' + renderInlineMarkdown(m[1]) + '</h3>'; continue; }
+      if ((m = trimmed.match(/^##\s+(.*)$/))) { flushPara(); flushList(); html += '<h2>' + renderInlineMarkdown(m[1]) + '</h2>'; continue; }
+      if ((m = trimmed.match(/^-\s+(.*)$/))) {
+        flushPara();
+        if (!listBuffer || listBuffer.type !== 'ul') { flushList(); listBuffer = { type: 'ul', items: [] }; }
+        listBuffer.items.push(m[1]);
+        continue;
+      }
+      if ((m = trimmed.match(/^\d+\.\s+(.*)$/))) {
+        flushPara();
+        if (!listBuffer || listBuffer.type !== 'ol') { flushList(); listBuffer = { type: 'ol', items: [] }; }
+        listBuffer.items.push(m[1]);
+        continue;
+      }
+      flushList();
+      paraBuffer.push(trimmed);
+    }
+    flushPara();
+    flushList();
+    return html;
+  }
+
+  function renderMarkdownInto(el, src) {
+    el.innerHTML = renderMarkdown(src == null ? '' : src);
+  }
+
+  function clamp(n, min, max) {
+    return Math.min(Math.max(n, min), max);
+  }
+
+  // Formats a centipawn/mate score as e.g. "+0.34" or "-1.20" or "M3"/"-M3".
+  // `forWhite` — when the caller has a score from a specific side's
+  // perspective (UCI scores are always from the side-to-move's perspective)
+  // pass the FEN's turn so the sign can be normalized to "white advantage
+  // positive" for consistent display.
+  function fmtScore(cp, mate) {
+    if (typeof mate === 'number' && mate !== null) {
+      return (mate > 0 ? 'M' + mate : '-M' + Math.abs(mate));
+    }
+    if (typeof cp !== 'number' || cp === null || isNaN(cp)) return '—';
+    var pawns = cp / 100;
+    var sign = pawns > 0 ? '+' : (pawns < 0 ? '' : '±');
+    return sign + pawns.toFixed(2);
+  }
+
+  // Normalizes a UCI score (always from side-to-move's perspective) to
+  // "positive = white is better" for bar/graph rendering.
+  function normalizeToWhite(cp, mate, turnIsWhite) {
+    var sign = turnIsWhite ? 1 : -1;
+    return {
+      cp: typeof cp === 'number' ? cp * sign : null,
+      mate: typeof mate === 'number' ? mate * sign : null,
+    };
+  }
+
+  function uciToMoveParts(uci) {
+    if (!uci || uci.length < 4) return null;
+    return {
+      from: uci.slice(0, 2),
+      to: uci.slice(2, 4),
+      promotion: uci.length > 4 ? uci[4] : undefined,
+    };
+  }
+
+  // Replays a UCI principal variation (e.g. "e2e4 e7e5 g1f3") from a FEN into
+  // a SAN string (e.g. "e4 e5 Nf3"), stopping early (with a trailing "…") if
+  // any move fails to apply (shouldn't happen for a legal engine PV, but a
+  // truncated `go` result at low depth can hand back a partial line).
+  function uciPvToSan(fen, pvUci, maxMoves) {
+    var replay = Chess(fen);
+    var out = [];
+    var tokens = (pvUci || []).slice(0, maxMoves || 6);
+    for (var i = 0; i < tokens.length; i++) {
+      var parts = uciToMoveParts(tokens[i]);
+      if (!parts) break;
+      var result = replay.move({ from: parts.from, to: parts.to, promotion: parts.promotion });
+      if (!result) { out.push('…'); break; }
+      out.push(result.san);
+    }
+    return out.join(' ');
+  }
+
+  // =====================================================================
+  // Conversation panel: hydrate /transcript, subscribe /events, /submit.
+  // Same contract as the other shells. Two kinds of things get POSTed to
+  // /submit here: plain learner questions typed into the coach drawer (sent
+  // as-is), and structured telemetry the shell itself emits on meaningful
+  // learner actions, JSON-encoded as {kind:'chapter-event', ...} so the
+  // debrief turn can tell a question from an event.
+  // =====================================================================
+
+  var chatLog = document.getElementById('chat-log');
+  var chatForm = document.getElementById('chat-form');
+  var chatInput = document.getElementById('chat-input');
+  var liveDot = document.getElementById('live-dot');
+  var liveLabel = document.getElementById('live-label');
+  var coachToggle = document.getElementById('coach-toggle');
+  var coachDrawer = document.getElementById('coach-drawer');
+  var coachClose = document.getElementById('coach-close');
+  var chatStarted = false;
+  var unreadCount = 0;
+
+  function clearEmptyState() {
+    if (!chatStarted) {
+      chatStarted = true;
+      chatLog.innerHTML = '';
+    }
+  }
+
+  function appendChat(entry) {
+    clearEmptyState();
+    var row = document.createElement('div');
+    row.className = 'chat-entry chat-' + (entry.role === 'learner' ? 'learner' : 'agent');
+    var roleEl = document.createElement('span');
+    roleEl.className = 'chat-role';
+    escapeText(roleEl, entry.role);
+    var textEl = document.createElement('span');
+    escapeText(textEl, entry.text);
+    row.appendChild(roleEl);
+    row.appendChild(textEl);
+    chatLog.appendChild(row);
+    chatLog.scrollTop = chatLog.scrollHeight;
+    if (entry.role !== 'learner' && coachDrawer.hidden) {
+      unreadCount += 1;
+      updateCoachBadge();
+    }
+  }
+
+  function updateCoachBadge() {
+    var existing = coachToggle.querySelector('.badge');
+    if (unreadCount > 0) {
+      if (!existing) {
+        existing = document.createElement('span');
+        existing.className = 'badge';
+        coachToggle.appendChild(existing);
+      }
+      existing.textContent = String(unreadCount);
+    } else if (existing) {
+      existing.remove();
+    }
+  }
+
+  function openCoach(seedText) {
+    coachDrawer.hidden = false;
+    coachToggle.setAttribute('aria-expanded', 'true');
+    unreadCount = 0;
+    updateCoachBadge();
+    if (typeof seedText === 'string') {
+      chatInput.value = seedText;
+    }
+    chatInput.focus();
+    if (typeof seedText === 'string') {
+      var len = seedText.length;
+      try { chatInput.setSelectionRange(len, len); } catch (e) {}
+    }
+  }
+  function closeCoach() {
+    coachDrawer.hidden = true;
+    coachToggle.setAttribute('aria-expanded', 'false');
+  }
+  coachToggle.addEventListener('click', function () {
+    if (coachDrawer.hidden) openCoach(); else closeCoach();
+  });
+  coachClose.addEventListener('click', closeCoach);
+
+  async function hydrateTranscript() {
+    try {
+      var res = await fetch('/transcript');
+      var entries = await res.json();
+      entries.forEach(appendChat);
+    } catch (err) {
+      console.error('Could not load transcript', err);
+    }
+  }
+
+  function submitText(text) {
+    return fetch('/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text }),
+    }).catch(function (err) {
+      console.error('Could not submit', err);
+    });
+  }
+
+  // Structured telemetry the agent debriefs from — see the event catalogue
+  // in the design spec: section-viewed, exercise-attempted, exercise-solved,
+  // hint-revealed, line-explored, quiz-answered, chapter-completed.
+  function emitEvent(event, sectionId, blockIndex, payload) {
+    var envelope = {
+      kind: 'chapter-event',
+      event: event,
+      section: sectionId,
+      block: blockIndex,
+      payload: payload || {},
+      at: new Date().toISOString(),
+    };
+    return submitText(JSON.stringify(envelope));
+  }
+
+  function subscribeEvents(onState) {
+    var source = new EventSource('/events');
+    source.onopen = function () {
+      liveDot.className = 'live-dot ok';
+      liveLabel.textContent = 'live';
+    };
+    source.onerror = function () {
+      liveDot.className = 'live-dot bad';
+      liveLabel.textContent = 'reconnecting…';
+    };
+    source.onmessage = function (event) {
+      var msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch (e) {
+        return;
+      }
+      if (msg.kind === 'chat') {
+        appendChat(msg);
+      } else if (msg.kind === 'state' && typeof onState === 'function') {
+        onState(msg.data);
+      }
+    };
+  }
+
+  chatForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    var text = chatInput.value.trim();
+    if (!text) return;
+    chatInput.value = '';
+    submitText(text);
+  });
+
+  function askAboutButton(sectionHeading, blockType, sectionId, blockIndex) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ask-about';
+    btn.textContent = 'Ask about this';
+    btn.setAttribute('aria-label', 'Ask the coach about this ' + blockType + ' block');
+    btn.addEventListener('click', function () {
+      openCoach('About "' + sectionHeading + '" → ' + blockType + ': ');
+      emitEvent('ask-opened', sectionId, blockIndex, { blockType: blockType });
+    });
+    return btn;
+  }
+
+  // =====================================================================
+  // Engine manager: ONE shared Stockfish WASM worker for the whole page,
+  // with a depth-1 request queue (a new request supersedes any pending one
+  // rather than piling up). Feature-detects multithreaded vs single-thread
+  // build via self.crossOriginIsolated, and degrades to `available:false`
+  // (hiding all eval UI, never breaking anything else) if both fail to
+  // load — e.g. the --assets flag hasn't been wired up yet, or the files
+  // are missing. See docs/superpowers/specs/
+  // 2026-08-16-chapter-mode-engine-coaching-design.md section 3b.
+  // =====================================================================
+
+  var ENGINE_ASSET_MULTI = '/assets/stockfish-18-lite.js';
+  var ENGINE_ASSET_SINGLE = '/assets/stockfish-18-lite-single.js';
+  var ENGINE_BOOT_TIMEOUT_MS = 10000;
+
+  var Engine = (function () {
+    var worker = null;
+    var available = null; // null = unknown/booting, true/false once resolved
+    var bootPromise = null;
+    var busy = false;
+    var currentJob = null;
+    var pendingJob = null;
+    var listeners = [];
+    var activeEngineName = null;
+
+    function notify() {
+      listeners.forEach(function (fn) {
+        try { fn(available); } catch (e) { /* listener errors must not break the engine */ }
+      });
+    }
+
+    function onAvailability(fn) {
+      listeners.push(fn);
+      if (available !== null) fn(available);
+      return function () {
+        var idx = listeners.indexOf(fn);
+        if (idx >= 0) listeners.splice(idx, 1);
+      };
+    }
+
+    function tryBoot(url) {
+      return new Promise(function (resolve, reject) {
+        var settled = false;
+        var w;
+        try {
+          w = new Worker(url);
+        } catch (err) {
+          reject(err);
+          return;
+        }
+        var timeout = setTimeout(function () {
+          if (settled) return;
+          settled = true;
+          try { w.terminate(); } catch (e) {}
+          reject(new Error('engine boot timeout: ' + url));
+        }, ENGINE_BOOT_TIMEOUT_MS);
+
+        w.onerror = function (err) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          try { w.terminate(); } catch (e) {}
+          reject(err);
+        };
+        w.onmessage = function (e) {
+          var line = typeof e.data === 'string' ? e.data : '';
+          if (line.indexOf('uciok') !== -1) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            w.onmessage = handleMessage;
+            w.postMessage('isready');
+            resolve(w);
+          }
+        };
+        try {
+          w.postMessage('uci');
+        } catch (err) {
+          clearTimeout(timeout);
+          reject(err);
+        }
+      });
+    }
+
+    function bootOnce() {
+      if (bootPromise) return bootPromise;
+      var preferred = (typeof window !== 'undefined' && window.crossOriginIsolated) ? ENGINE_ASSET_MULTI : ENGINE_ASSET_SINGLE;
+      bootPromise = tryBoot(preferred).then(function (w) {
+        worker = w;
+        available = true;
+        activeEngineName = preferred;
+        notify();
+        return true;
+      }).catch(function () {
+        if (preferred === ENGINE_ASSET_SINGLE) {
+          available = false;
+          notify();
+          return false;
+        }
+        return tryBoot(ENGINE_ASSET_SINGLE).then(function (w) {
+          worker = w;
+          available = true;
+          activeEngineName = ENGINE_ASSET_SINGLE;
+          notify();
+          return true;
+        }).catch(function () {
+          available = false;
+          notify();
+          return false;
+        });
+      });
+      return bootPromise;
+    }
+
+    function parseInfoLine(line) {
+      var depthMatch = line.match(/\bdepth (\d+)/);
+      var multipvMatch = line.match(/\bmultipv (\d+)/);
+      var cpMatch = line.match(/\bscore cp (-?\d+)/);
+      var mateMatch = line.match(/\bscore mate (-?\d+)/);
+      var pvMatch = line.match(/\bpv (.+)$/);
+      if (!depthMatch || line.indexOf(' score ') === -1) return null;
+      return {
+        depth: Number(depthMatch[1]),
+        multipv: multipvMatch ? Number(multipvMatch[1]) : 1,
+        cp: cpMatch ? Number(cpMatch[1]) : null,
+        mate: mateMatch ? Number(mateMatch[1]) : null,
+        pv: pvMatch ? pvMatch[1].trim().split(/\s+/) : [],
+      };
+    }
+
+    function handleMessage(e) {
+      var line = typeof e.data === 'string' ? e.data : '';
+      if (!currentJob) return;
+      if (line.indexOf('info') === 0 && line.indexOf(' score ') !== -1) {
+        var info = parseInfoLine(line);
+        if (info) {
+          currentJob.lines.set(info.multipv, info);
+          if (typeof currentJob.onInfo === 'function') {
+            var arr = Array.from(currentJob.lines.values()).sort(function (a, b) { return a.multipv - b.multipv; });
+            currentJob.onInfo(arr);
+          }
+        }
+      } else if (line.indexOf('bestmove') === 0) {
+        var parts = line.split(/\s+/);
+        var best = parts[1] === '(none)' ? null : parts[1];
+        var finished = currentJob;
+        currentJob = null;
+        busy = false;
+        if (finished && typeof finished.onBest === 'function') {
+          var lines = Array.from(finished.lines.values()).sort(function (a, b) { return a.multipv - b.multipv; });
+          finished.onBest(best, lines);
+        }
+        if (pendingJob) {
+          var next = pendingJob;
+          pendingJob = null;
+          runJob(next);
+        }
+      }
+    }
+
+    function runJob(job) {
+      busy = true;
+      currentJob = job;
+      job.lines = new Map();
+      worker.postMessage('stop');
+      worker.postMessage('setoption name MultiPV value ' + (job.multipv || 1));
+      worker.postMessage('position fen ' + job.fen);
+      worker.postMessage('go depth ' + (job.depth || 18));
+    }
+
+    // Requests analysis of `fen`. If the engine is mid-analysis, the running
+    // job is stopped and this request becomes the sole pending job (never
+    // queued alongside older ones) — "cancel superseded requests rather than
+    // queueing them all up".
+    function request(fen, opts) {
+      opts = opts || {};
+      var job = { fen: fen, depth: opts.depth || 18, multipv: opts.multipv || 1, onInfo: opts.onInfo, onBest: opts.onBest };
+      return bootOnce().then(function (ok) {
+        if (!ok) return false;
+        if (busy) {
+          worker.postMessage('stop');
+          pendingJob = job;
+        } else {
+          runJob(job);
+        }
+        return true;
+      });
+    }
+
+    // Drops any pending job and asks the engine to stop the current one.
+    // Used when a board goes off-screen (IntersectionObserver) so it stops
+    // consuming engine time, per the render-time engine requirements.
+    function cancelPending() {
+      pendingJob = null;
+      if (busy && worker) {
+        try { worker.postMessage('stop'); } catch (e) {}
+      }
+    }
+
+    return {
+      request: request,
+      cancelPending: cancelPending,
+      onAvailability: onAvailability,
+      boot: bootOnce,
+      isAvailable: function () { return available; },
+      engineName: function () { return activeEngineName; },
+    };
+  })();
+
+  // Tracks which analyzable board is currently the "active" one (most
+  // visible, per IntersectionObserver) so the shared engine only ever
+  // analyses one position at a time, per the render-time requirements.
+  var VisibilityTracker = (function () {
+    var visible = new Map(); // el -> ratio
+    var widgetsByEl = new Map();
+    var activeWidget = null;
+    var observer = (typeof IntersectionObserver !== 'undefined') ? new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.35) {
+          visible.set(entry.target, entry.intersectionRatio);
+        } else {
+          visible.delete(entry.target);
+        }
+      });
+      pickActive();
+    }, { threshold: [0, 0.35, 0.6, 1] }) : null;
+
+    function pickActive() {
+      var best = null;
+      var bestRatio = -1;
+      visible.forEach(function (ratio, el) {
+        if (ratio > bestRatio) { bestRatio = ratio; best = widgetsByEl.get(el); }
+      });
+      if (best !== activeWidget) {
+        if (activeWidget && typeof activeWidget.onInactive === 'function') activeWidget.onInactive();
+        activeWidget = best || null;
+        if (activeWidget && typeof activeWidget.onActive === 'function') activeWidget.onActive();
+      }
+    }
+
+    function register(el, widget) {
+      widgetsByEl.set(el, widget);
+      if (observer) observer.observe(el);
+    }
+    function unregister(el) {
+      if (observer) observer.unobserve(el);
+      visible.delete(el);
+      widgetsByEl.delete(el);
+      if (activeWidget === widgetsByEl.get(el)) activeWidget = null;
+    }
+    // Called by a widget whose position changed while it is (or might be)
+    // the active one, to re-request analysis without waiting for a new
+    // intersection event.
+    function refresh(widget) {
+      if (widget === activeWidget && typeof widget.onActive === 'function') widget.onActive();
+    }
+    return { register: register, unregister: unregister, refresh: refresh };
+  })();
+
+  // =====================================================================
+  // Eval bar widget — vertical bar, white portion proportional to
+  // advantage, clamped at ±5 pawns; mate shown as a full bar + "M3"/"-M3".
+  // Depth is always shown next to the eval so a shallow flash eval and a
+  // deep authoring eval never look identical.
+  // =====================================================================
+
+  function createEvalBar() {
+    var wrap = document.createElement('div');
+    wrap.className = 'eval-bar-wrap';
+    var bar = document.createElement('div');
+    bar.className = 'eval-bar';
+    bar.setAttribute('role', 'img');
+    bar.setAttribute('aria-label', 'Evaluation bar');
+    var fill = document.createElement('div');
+    fill.className = 'eval-bar-fill';
+    fill.style.height = '50%';
+    bar.appendChild(fill);
+    var label = document.createElement('div');
+    label.className = 'eval-label';
+    wrap.appendChild(bar);
+    wrap.appendChild(label);
+
+    function update(info) {
+      if (!info) {
+        bar.classList.remove('thinking');
+        fill.style.height = '50%';
+        label.textContent = '';
+        return;
+      }
+      if (info.thinking) bar.classList.add('thinking'); else bar.classList.remove('thinking');
+      var pct;
+      if (typeof info.mateWhite === 'number' && info.mateWhite !== null) {
+        pct = info.mateWhite > 0 ? 100 : 0;
+      } else if (typeof info.cpWhite === 'number' && info.cpWhite !== null) {
+        var pawns = clamp(info.cpWhite / 100, -5, 5);
+        pct = 50 + (pawns / 5) * 50;
+      } else {
+        pct = 50;
+      }
+      fill.style.height = pct + '%';
+      var scoreText = fmtScore(info.cpWhite, info.mateWhite);
+      label.textContent = info.depth ? (scoreText + '  d' + info.depth) : scoreText;
+      bar.setAttribute('aria-label', 'Evaluation ' + scoreText + (info.depth ? (' at depth ' + info.depth) : ''));
+    }
+    return { el: wrap, update: update };
+  }
+
+  // A collapsible "top 3 lines" panel (MultiPV 3), each row `eval + SAN`.
+  function createTopLinesPanel() {
+    var details = document.createElement('details');
+    details.className = 'top-lines';
+    var summary = document.createElement('summary');
+    summary.textContent = 'Top lines';
+    var ol = document.createElement('ol');
+    details.appendChild(summary);
+    details.appendChild(ol);
+
+    function update(fen, lines) {
+      ol.innerHTML = '';
+      (lines || []).forEach(function (line) {
+        var li = document.createElement('li');
+        var evalSpan = document.createElement('span');
+        evalSpan.className = 'pv-eval';
+        evalSpan.textContent = fmtScore(line.cpWhite, line.mateWhite);
+        var sanSpan = document.createElement('span');
+        sanSpan.textContent = uciPvToSan(fen, line.pv, 6);
+        li.appendChild(evalSpan);
+        li.appendChild(sanSpan);
+        ol.appendChild(li);
+      });
+    }
+    return { el: details, update: update };
+  }
+
+  // =====================================================================
+  // Board widget: SVG chessboard rendered from a FEN, with optional
+  // click-to-move (via vendored chess.js, legal destinations only — same
+  // interaction model as board-shell.html) and optional arrow/highlight
+  // overlays. Factory function so a chapter can host many independent
+  // boards on one page (board-shell's original code used module-level
+  // singletons since it only ever renders one board per tab).
+  // =====================================================================
+
+  var FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+  var SQUARE_PX = 60; // px per square in the 480x480 viewBox
+  var PIECE_INSET = 0.035; // fraction of a square left as breathing room around a piece
+  var SHOW_COORDS = true;
+  var WRONG_MOVE_RESET_MS = 1100; // long enough to register the X, short enough not to nag
+  // Retained only for text contexts (aria/plain-text fallbacks); boards render
+  // the vector set from the inlined <defs>.
+  var PIECE_GLYPHS = {
+    wp: '♙', wn: '♘', wb: '♗', wr: '♖', wq: '♕', wk: '♔',
+    bp: '♟', bn: '♞', bb: '♝', br: '♜', bq: '♛', bk: '♚',
+  };
+  var boardWidgetSeq = 0;
+
+  function parseFenBoard(fen) {
+    var placement = fen.split(' ')[0];
+    var rows = placement.split('/');
+    var board = {};
+    rows.forEach(function (rowStr, i) {
+      var rankNumber = 8 - i;
+      var fileIndex = 0;
+      for (var c = 0; c < rowStr.length; c++) {
+        var ch = rowStr[c];
+        if (/[1-8]/.test(ch)) {
+          fileIndex += Number(ch);
+        } else {
+          board[FILES[fileIndex] + rankNumber] = ch;
+          fileIndex += 1;
+        }
+      }
+    });
+    return board;
+  }
+
+  // options: { fen, orientation, interactive, arrows, highlights, onMove,
+  //            onSelectionChange, ariaPrefix, readAloudStatus }
+  function createBoardWidget(options) {
+    var opts = options || {};
+    var id = 'bw' + (boardWidgetSeq++);
+    var orientation = opts.orientation === 'black' ? 'black' : 'white';
+    var interactive = !!opts.interactive;
+    var chess = Chess(opts.fen);
+    var selected = null;
+    var legalDestinations = new Map();
+    var pendingPromotion = null;
+    var staticArrows = opts.arrows || [];
+    var verdict = null;
+    var engineArrow = null; // {from, to} drawn in a distinct colour
+    var highlightSquares = opts.highlights || [];
+    var onMove = typeof opts.onMove === 'function' ? opts.onMove : null;
+
+    var holder = document.createElement('div');
+    holder.className = 'board-holder';
+    var svgNs = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(svgNs, 'svg');
+    svg.setAttribute('viewBox', '0 0 480 480');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', (opts.ariaPrefix || 'Chess board') + ', ' + (chess.turn() === 'w' ? 'white' : 'black') + ' to move');
+    svg.classList.add('board-svg');
+    if (!interactive) svg.classList.add('readonly');
+    var defs = document.createElementNS(svgNs, 'defs');
+    var markerId = id + '-arrow';
+    var marker = document.createElementNS(svgNs, 'marker');
+    marker.setAttribute('id', markerId);
+    // userSpaceOnUse: the default markerUnits multiplies by stroke-width, which
+    // made an 8-unit head render ~48px wide inside a 60px square.
+    marker.setAttribute('markerUnits', 'userSpaceOnUse');
+    marker.setAttribute('markerWidth', '18');
+    marker.setAttribute('markerHeight', '18');
+    marker.setAttribute('refX', '15');
+    marker.setAttribute('refY', '9');
+    marker.setAttribute('orient', 'auto-start-reverse');
+    var markerPath = document.createElementNS(svgNs, 'path');
+    markerPath.setAttribute('d', 'M0,1 L17,9 L0,17 Z');
+    markerPath.setAttribute('fill', 'context-stroke');
+    marker.appendChild(markerPath);
+    defs.appendChild(marker);
+    svg.appendChild(defs);
+    holder.appendChild(svg);
+
+    var statusEl = document.createElement('div');
+    statusEl.className = 'board-status';
+    var promoPicker = document.createElement('div');
+    promoPicker.className = 'promotion-picker';
+    promoPicker.hidden = true;
+
+    // Vector pieces from the inlined <defs> block (see scripts/build-piece-defs.mjs).
+    // Rendered as <use> rather than a Unicode text glyph: glyph rendering varies
+    // by installed font, and outline-style white glyphs wash out on light squares.
+    // A pedagogical verdict drawn over a square: 'right' or 'wrong'. Purely a
+    // presentation concern — the exercise block decides what it means.
+    function verdictNode(square, kind) {
+      var xy = squareToXY(square);
+      // Corner, not centre: a centred badge hides the very piece the learner
+      // just moved, which is the thing they need to see.
+      var r = SQUARE_PX * 0.21;
+      var cx = xy.x + SQUARE_PX - r - 2;
+      var cy = xy.y + r + 2;
+      var g = document.createElementNS(svgNs, 'g');
+      g.setAttribute('class', 'verdict verdict-' + kind);
+      g.style.pointerEvents = 'none';
+      var disc = document.createElementNS(svgNs, 'circle');
+      disc.setAttribute('cx', cx);
+      disc.setAttribute('cy', cy);
+      disc.setAttribute('r', r);
+      disc.setAttribute('fill', kind === 'right' ? 'var(--verdict-right)' : 'var(--verdict-wrong)');
+      disc.setAttribute('stroke', '#fff');
+      disc.setAttribute('stroke-width', '2');
+      g.appendChild(disc);
+      var mark = document.createElementNS(svgNs, 'path');
+      var k = r * 0.5;
+      mark.setAttribute('d', kind === 'right'
+        ? ('M ' + (cx - k) + ' ' + cy + ' l ' + (k * 0.75) + ' ' + (k * 0.8) + ' L ' + (cx + k * 1.05) + ' ' + (cy - k * 0.75))
+        : ('M ' + (cx - k) + ' ' + (cy - k) + ' L ' + (cx + k) + ' ' + (cy + k) +
+           ' M ' + (cx + k) + ' ' + (cy - k) + ' L ' + (cx - k) + ' ' + (cy + k)));
+      mark.setAttribute('stroke', '#fff');
+      mark.setAttribute('stroke-width', Math.max(2.5, SQUARE_PX * 0.075));
+      mark.setAttribute('stroke-linecap', 'round');
+      mark.setAttribute('stroke-linejoin', 'round');
+      mark.setAttribute('fill', 'none');
+      g.appendChild(mark);
+      return g;
+    }
+
+    function pieceNode(code, x, y) {
+      var inset = SQUARE_PX * PIECE_INSET;
+      var use = document.createElementNS(svgNs, 'use');
+      var ref = '#pc-' + code;
+      use.setAttribute('href', ref);
+      use.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', ref);
+      use.setAttribute('x', x + inset);
+      use.setAttribute('y', y + inset);
+      use.setAttribute('width', SQUARE_PX - inset * 2);
+      use.setAttribute('height', SQUARE_PX - inset * 2);
+      use.setAttribute('class', 'piece');
+      // Pieces are painted after (and therefore above) their square, so they
+      // would swallow clicks meant for it. Letting the rect underneath own
+      // every click keeps one code path for occupied and empty squares alike.
+      use.style.pointerEvents = 'none';
+      return use;
+    }
+
+    function squareToXY(square) {
+      var fileIndex = FILES.indexOf(square[0]);
+      var rankIndex = Number(square[1]);
+      var col, row;
+      if (orientation === 'black') {
+        col = 7 - fileIndex;
+        row = rankIndex - 1;
+      } else {
+        col = fileIndex;
+        row = 8 - rankIndex;
+      }
+      return { x: col * SQUARE_PX, y: row * SQUARE_PX };
+    }
+
+    function clearSelection() {
+      selected = null;
+      legalDestinations = new Map();
+      pendingPromotion = null;
+      promoPicker.hidden = true;
+      promoPicker.innerHTML = '';
+    }
+
+    function updateStatus() {
+      if (!statusEl.parentNode && !opts.hideStatus) { /* appended by caller */ }
+      if (chess.in_checkmate()) {
+        statusEl.textContent = 'Checkmate — ' + (chess.turn() === 'w' ? 'Black' : 'White') + ' wins.';
+        statusEl.className = 'board-status warn';
+      } else if (chess.in_stalemate()) {
+        statusEl.textContent = 'Stalemate.';
+        statusEl.className = 'board-status warn';
+      } else if (chess.in_check()) {
+        statusEl.textContent = (chess.turn() === 'w' ? 'White' : 'Black') + ' to move — in check.';
+        statusEl.className = 'board-status warn';
+      } else {
+        statusEl.textContent = (chess.turn() === 'w' ? 'White' : 'Black') + ' to move.';
+        statusEl.className = 'board-status';
+      }
+    }
+
+    function drawArrow(from, to, colorVar) {
+      var a = squareToXY(from);
+      var b = squareToXY(to);
+      var x1 = a.x + SQUARE_PX / 2, y1 = a.y + SQUARE_PX / 2;
+      var x2 = b.x + SQUARE_PX / 2, y2 = b.y + SQUARE_PX / 2;
+      // Shorten the line so the arrowhead doesn't bury itself under the
+      // destination piece glyph.
+      var dx = x2 - x1, dy = y2 - y1;
+      var len = Math.sqrt(dx * dx + dy * dy) || 1;
+      var shorten = SQUARE_PX * 0.32;
+      var x2s = x2 - (dx / len) * shorten;
+      var y2s = y2 - (dy / len) * shorten;
+      var line = document.createElementNS(svgNs, 'line');
+      line.setAttribute('x1', x1);
+      line.setAttribute('y1', y1);
+      line.setAttribute('x2', x2s);
+      line.setAttribute('y2', y2s);
+      line.setAttribute('stroke', colorVar);
+      line.setAttribute('stroke-width', '6');
+      line.setAttribute('stroke-linecap', 'round');
+      line.setAttribute('marker-end', 'url(#' + markerId + ')');
+      line.style.pointerEvents = 'none';
+      svg.appendChild(line);
+    }
+
+    function render() {
+      // Clear everything except <defs>.
+      while (svg.lastChild && svg.lastChild !== defs) svg.removeChild(svg.lastChild);
+      var boardMap = parseFenBoard(chess.fen());
+      var highlightSet = {};
+      highlightSquares.forEach(function (sq) { highlightSet[sq] = true; });
+
+      FILES.forEach(function (file) {
+        for (var rankNumber = 1; rankNumber <= 8; rankNumber++) {
+          // `let`, not `var`: every click handler created in this loop closes
+          // over this binding. With `var` (function-scoped) all eight handlers
+          // in a file shared one variable holding its final value, so clicking
+          // any square on the g-file called onSquareClick('g8') and the board
+          // silently refused to select anything.
+          let square = file + rankNumber;
+          var xy = squareToXY(square);
+          var x = xy.x, y = xy.y;
+          var isLight = (FILES.indexOf(file) + rankNumber) % 2 === 1;
+
+          var rect = document.createElementNS(svgNs, 'rect');
+          rect.setAttribute('x', x);
+          rect.setAttribute('y', y);
+          rect.setAttribute('width', SQUARE_PX);
+          rect.setAttribute('height', SQUARE_PX);
+          rect.setAttribute('class', 'square');
+          rect.setAttribute('data-square', square);
+          rect.setAttribute('tabindex', interactive ? '0' : '-1');
+          rect.setAttribute('aria-label', square + (boardMap[square] ? (' ' + boardMap[square]) : ' empty'));
+          var fillColor = square === selected ? 'var(--sq-selected)' : (isLight ? 'var(--sq-light)' : 'var(--sq-dark)');
+          rect.setAttribute('fill', fillColor);
+          if (interactive) {
+            rect.addEventListener('click', function () { onSquareClick(square); });
+            rect.addEventListener('keydown', function (ev) {
+              if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onSquareClick(square); }
+            });
+          }
+          svg.appendChild(rect);
+
+          if (SHOW_COORDS) {
+            var onLight = isLight ? 'var(--sq-coord-on-light)' : 'var(--sq-coord-on-dark)';
+            if (x === 0) {
+              var rankTxt = document.createElementNS(svgNs, 'text');
+              rankTxt.setAttribute('x', x + SQUARE_PX * 0.08);
+              rankTxt.setAttribute('y', y + SQUARE_PX * 0.28);
+              rankTxt.setAttribute('class', 'coord');
+              rankTxt.setAttribute('fill', onLight);
+              rankTxt.textContent = square[1];
+              svg.appendChild(rankTxt);
+            }
+            if (y === SQUARE_PX * 7) {
+              var fileTxt = document.createElementNS(svgNs, 'text');
+              fileTxt.setAttribute('x', x + SQUARE_PX * 0.92);
+              fileTxt.setAttribute('y', y + SQUARE_PX * 0.90);
+              fileTxt.setAttribute('text-anchor', 'end');
+              fileTxt.setAttribute('class', 'coord');
+              fileTxt.setAttribute('fill', onLight);
+              fileTxt.textContent = square[0];
+              svg.appendChild(fileTxt);
+            }
+          }
+
+          if (highlightSet[square]) {
+            var hl = document.createElementNS(svgNs, 'rect');
+            hl.setAttribute('x', x);
+            hl.setAttribute('y', y);
+            hl.setAttribute('width', SQUARE_PX);
+            hl.setAttribute('height', SQUARE_PX);
+            hl.setAttribute('fill', 'var(--highlight)');
+            hl.style.pointerEvents = 'none';
+            svg.appendChild(hl);
+          }
+
+          var piece = boardMap[square];
+          if (piece) {
+            var color = piece === piece.toUpperCase() ? 'w' : 'b';
+            svg.appendChild(pieceNode(color + piece.toUpperCase(), x, y));
+          }
+
+          if (legalDestinations.has(square)) {
+            var marker2 = document.createElementNS(svgNs, 'circle');
+            marker2.setAttribute('cx', x + SQUARE_PX / 2);
+            marker2.setAttribute('cy', y + SQUARE_PX / 2);
+            var isCapture = !!piece || legalDestinations.get(square).some(function (m) { return !!m.captured; });
+            marker2.setAttribute('r', isCapture ? SQUARE_PX * 0.42 : SQUARE_PX * 0.16);
+            marker2.setAttribute('fill', isCapture ? 'none' : 'var(--sq-legal)');
+            marker2.setAttribute('stroke', isCapture ? 'var(--sq-legal-capture)' : 'none');
+            marker2.setAttribute('stroke-width', isCapture ? '5' : '0');
+            marker2.style.pointerEvents = 'none';
+            svg.appendChild(marker2);
+          }
+        }
+      });
+
+      // Coordinates are drawn per-square in the loop above, tinted with the
+      // opposite square colour so they stay legible on both shades.
+
+      if (verdict && verdict.square) svg.appendChild(verdictNode(verdict.square, verdict.kind));
+
+      staticArrows.forEach(function (arrow) {
+        if (arrow && arrow.from && arrow.to) drawArrow(arrow.from, arrow.to, arrow.color ? arrow.color : 'var(--arrow)');
+      });
+      if (engineArrow) drawArrow(engineArrow.from, engineArrow.to, 'var(--arrow-best)');
+
+      svg.setAttribute('aria-label', (opts.ariaPrefix || 'Chess board') + ', ' + (chess.turn() === 'w' ? 'white' : 'black') + ' to move');
+      updateStatus();
+    }
+
+    function finalizeMove(from, to, promotion) {
+      var result = chess.move({ from: from, to: to, promotion: promotion });
+      clearSelection();
+      if (!result) { render(); return; }
+      render();
+      if (onMove) onMove(result, chess);
+    }
+
+    function showPromotionPicker(from, to, choices) {
+      pendingPromotion = { from: from, to: to };
+      promoPicker.innerHTML = '';
+      promoPicker.hidden = false;
+      var color = chess.turn();
+      ['q', 'r', 'b', 'n'].forEach(function (piece) {
+        if (!choices.some(function (m) { return m.promotion === piece; })) return;
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        // Same vector set as the board, so the picker can't disagree with the
+        // squares it is about to change.
+        var ref = '#pc-' + color + piece.toUpperCase();
+        btn.innerHTML = '<svg viewBox="0 0 100 100" width="34" height="34" aria-hidden="true" focusable="false">'
+          + '<use href="' + ref + '" xlink:href="' + ref + '" width="100" height="100"></use></svg>';
+        btn.setAttribute('aria-label', 'Promote to ' + piece);
+        btn.addEventListener('click', function () { finalizeMove(from, to, piece); });
+        promoPicker.appendChild(btn);
+      });
+    }
+
+    function onSquareClick(square) {
+      if (!interactive || pendingPromotion) return;
+
+      if (selected && legalDestinations.has(square)) {
+        var choices = legalDestinations.get(square);
+        if (choices.length > 1) { showPromotionPicker(selected, square, choices); }
+        else { finalizeMove(selected, square, choices[0].promotion); }
+        return;
+      }
+
+      var piece = chess.get(square);
+      if (selected === square) { clearSelection(); render(); return; }
+
+      if (piece && piece.color === chess.turn()) {
+        var verboseMoves = chess.moves({ square: square, verbose: true });
+        if (verboseMoves.length === 0) { clearSelection(); render(); return; }
+        selected = square;
+        legalDestinations = new Map();
+        verboseMoves.forEach(function (move) {
+          if (!legalDestinations.has(move.to)) legalDestinations.set(move.to, []);
+          legalDestinations.get(move.to).push(move);
+        });
+        render();
+        if (typeof opts.onSelectionChange === 'function') opts.onSelectionChange(square, verboseMoves);
+        return;
+      }
+
+      clearSelection();
+      render();
+    }
+
+    render();
+
+    return {
+      el: holder,
+      svg: svg,
+      statusEl: statusEl,
+      promoPicker: promoPicker,
+      setFen: function (fen) { chess.load(fen); clearSelection(); render(); },
+      getFen: function () { return chess.fen(); },
+      getChess: function () { return chess; },
+      setArrows: function (arrows) { staticArrows = arrows || []; render(); },
+      setEngineArrow: function (fromTo) { engineArrow = fromTo; render(); },
+      setHighlights: function (squares) { highlightSquares = squares || []; render(); },
+      setInteractive: function (val) { interactive = !!val; svg.classList.toggle('readonly', !interactive); },
+      isInteractive: function () { return interactive; },
+      clearSelection: function () { clearSelection(); render(); },
+      setVerdict: function (square, kind) { verdict = square ? { square: square, kind: kind } : null; render(); },
+      render: render,
+    };
+  }
+
+  // =====================================================================
+  // Wires a board widget up to the shared Engine: eval bar + collapsible
+  // top-3 lines panel, analysed only while the board is the most-visible
+  // analyzable board on screen (IntersectionObserver via VisibilityTracker),
+  // and re-analysed whenever the board's position changes while active.
+  // `setHidden(true)` is how exercise blocks keep all of this invisible
+  // until the learner commits an answer — enforced here in the shell, not
+  // left to chance in authored data.
+  // =====================================================================
+
+  function attachLiveAnalysis(widget, config) {
+    config = config || {};
+    var depth = config.depth || 18;
+    var multipv = config.multipv || 3;
+    var showBestArrow = config.showBestArrow !== false;
+    var evalBar = createEvalBar();
+    var topLines = createTopLinesPanel();
+    var isActive = false;
+    var hidden = !!config.startHidden;
+
+    function syncVisibility() {
+      var engineGone = Engine.isAvailable() === false;
+      var show = !hidden && !engineGone;
+      evalBar.el.hidden = !show;
+      topLines.el.hidden = !show;
+    }
+
+    function requestAnalysis() {
+      if (hidden || Engine.isAvailable() === false) return;
+      var fen = widget.getFen();
+      var turnIsWhite = fen.split(' ')[1] === 'w';
+      evalBar.update({ thinking: true });
+      Engine.request(fen, {
+        depth: depth,
+        multipv: multipv,
+        onInfo: function (lines) {
+          var top = lines[0];
+          if (!top) return;
+          var norm = normalizeToWhite(top.cp, top.mate, turnIsWhite);
+          evalBar.update({ cpWhite: norm.cp, mateWhite: norm.mate, depth: top.depth, thinking: true });
+          var normalizedLines = lines.map(function (l) {
+            var n = normalizeToWhite(l.cp, l.mate, turnIsWhite);
+            return { cpWhite: n.cp, mateWhite: n.mate, pv: l.pv, depth: l.depth };
+          });
+          topLines.update(fen, normalizedLines);
+        },
+        onBest: function (best, lines) {
+          var top = lines[0];
+          if (top) {
+            var norm = normalizeToWhite(top.cp, top.mate, turnIsWhite);
+            evalBar.update({ cpWhite: norm.cp, mateWhite: norm.mate, depth: top.depth, thinking: false });
+          }
+          if (best && showBestArrow && typeof widget.setEngineArrow === 'function') {
+            var parts = uciToMoveParts(best);
+            if (parts) widget.setEngineArrow({ from: parts.from, to: parts.to });
+          }
+        },
+      });
+    }
+
+    var visEntry = {
+      onActive: function () { isActive = true; requestAnalysis(); },
+      onInactive: function () { isActive = false; Engine.cancelPending(); },
+    };
+    VisibilityTracker.register(widget.el, visEntry);
+    var unsubscribe = Engine.onAvailability(function () { syncVisibility(); });
+    syncVisibility();
+
+    return {
+      evalBarEl: evalBar.el,
+      topLinesEl: topLines.el,
+      setHidden: function (val) {
+        hidden = !!val;
+        syncVisibility();
+        if (!hidden && isActive) requestAnalysis();
+      },
+      refresh: function () { if (isActive) requestAnalysis(); },
+      // One-shot analysis regardless of visibility/active state — used for
+      // the exercise "engine says" fallback and compare-block live evals.
+      runOnce: function (fen, oneOffOpts) {
+        oneOffOpts = oneOffOpts || {};
+        return new Promise(function (resolve) {
+          var turnIsWhite = fen.split(' ')[1] === 'w';
+          Engine.request(fen, {
+            depth: oneOffOpts.depth || depth,
+            multipv: 1,
+            onBest: function (best, lines) {
+              var top = lines[0];
+              var norm = top ? normalizeToWhite(top.cp, top.mate, turnIsWhite) : { cp: null, mate: null };
+              resolve({ best: best, cpWhite: norm.cp, mateWhite: norm.mate, depth: top ? top.depth : null, pv: top ? top.pv : [] });
+            },
+          });
+        });
+      },
+      destroy: function () {
+        VisibilityTracker.unregister(widget.el);
+        if (unsubscribe) unsubscribe();
+      },
+    };
+  }
+
+  function engineUnavailableNote() {
+    var note = document.createElement('p');
+    note.className = 'eval-hidden-note';
+    note.textContent = '';
+    Engine.onAvailability(function (available) {
+      note.hidden = available !== false;
+      note.textContent = available === false ? 'Live engine unavailable in this session — everything else still works.' : '';
+    });
+    return note;
+  }
+
+  // =====================================================================
+  // Lightweight PGN move-text parser. The vendored chess.js above is the
+  // legal-move-generation build only (no load_pgn/pgn — see its header
+  // comment), so PGN support here is a small, deliberately narrow replay:
+  // headers, move numbers, {comments}, ;line comments and $NAGs are
+  // stripped; the remaining SAN tokens are replayed move-by-move with the
+  // sloppy parser. Recursive variations (RAVs in nested parens) are
+  // dropped, not rendered — chapters are expected to author one mainline
+  // per `game` block.
+  // =====================================================================
+
+  function parsePgn(pgn) {
+    var raw = String(pgn || '');
+    var headers = {};
+    raw.replace(/^\[(\w+)\s+"([^"]*)"\]\s*$/gm, function (m, key, val) {
+      headers[key] = val;
+      return '';
+    });
+    var movetext = raw.replace(/^\[.*\]\s*$/gm, ' ');
+    movetext = movetext.replace(/\{[^}]*\}/g, ' ');
+    movetext = movetext.replace(/;[^\n]*/g, ' ');
+    movetext = movetext.replace(/\([^()]*\)/g, ' '); // one level of RAV
+    movetext = movetext.replace(/\$\d+/g, ' ');
+    movetext = movetext.replace(/\b\d+\.(\.\.)?/g, ' ');
+    movetext = movetext.replace(/1-0|0-1|1\/2-1\/2|\*/g, ' ');
+    var tokens = movetext.split(/\s+/).map(function (t) { return t.trim(); }).filter(Boolean);
+
+    var startFen = (headers.SetUp === '1' && headers.FEN) ? headers.FEN : undefined;
+    var replay = Chess(startFen);
+    var positions = [replay.fen()];
+    var moves = [];
+    for (var i = 0; i < tokens.length; i++) {
+      var result = replay.move(tokens[i], { sloppy: true });
+      if (!result) continue; // skip unparseable tokens rather than aborting the whole game
+      moves.push(result);
+      positions.push(replay.fen());
+    }
+    return { headers: headers, moves: moves, positions: positions, startFen: startFen || positions[0] };
+  }
+
+  // =====================================================================
+  // Exercise-answer matching. `move` answers are compared via chess.js move
+  // objects (from/to/promotion) rather than string equality so "Nf3" and
+  // "Ng1-f3" both match the same authored answer, per the design contract.
+  // =====================================================================
+
+  function movesEquivalent(fen, sanA, sanB) {
+    try {
+      var a = Chess(fen).move(sanA, { sloppy: true });
+      var b = Chess(fen).move(sanB, { sloppy: true });
+      if (!a || !b) return false;
+      return a.from === b.from && a.to === b.to && (a.promotion || '') === (b.promotion || '');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // =====================================================================
+  // Block renderers. Each takes (block, ctx) where ctx = {sectionId,
+  // sectionHeading, blockIndex} and returns a `.block` wrapper element
+  // (which already carries the "ask about this" affordance).
+  // =====================================================================
+
+  function setInlineMarkdown(el, text) {
+    el.innerHTML = renderInlineMarkdown(escapeHtml(text == null ? '' : text));
+  }
+
+  function createBlockWrapper(extraClass, ctx, blockType) {
+    var wrap = document.createElement('div');
+    wrap.className = 'block ' + extraClass;
+    wrap.appendChild(askAboutButton(ctx.sectionHeading, blockType, ctx.sectionId, ctx.blockIndex));
+    return wrap;
+  }
+
+  function renderProseBlock(block, ctx) {
+    var wrap = createBlockWrapper('block-prose', ctx, 'prose');
+    var div = document.createElement('div');
+    div.className = 'prose';
+    renderMarkdownInto(div, block.body);
+    wrap.appendChild(div);
+    return wrap;
+  }
+
+  var CALLOUT_TITLES = { principle: 'Principle', theory: 'Theory', warning: 'Warning', insight: 'Insight' };
+  var CALLOUT_VARIANTS = ['principle', 'theory', 'warning', 'insight'];
+
+  function renderCalloutBlock(block, ctx) {
+    var variant = CALLOUT_VARIANTS.indexOf(block.variant) >= 0 ? block.variant : 'theory';
+    var wrap = createBlockWrapper('block-callout', ctx, 'callout');
+    var box = document.createElement('div');
+    box.className = 'callout callout-' + variant;
+    var title = document.createElement('div');
+    title.className = 'callout-title';
+    escapeText(title, block.title || CALLOUT_TITLES[variant]);
+    box.appendChild(title);
+    var body = document.createElement('div');
+    body.className = 'prose';
+    renderMarkdownInto(body, block.body);
+    box.appendChild(body);
+    wrap.appendChild(box);
+    return wrap;
+  }
+
+  function renderRecapBlock(block, ctx) {
+    var wrap = createBlockWrapper('block-recap', ctx, 'recap');
+    var ul = document.createElement('ul');
+    ul.className = 'recap-list';
+    (block.points || []).forEach(function (point) {
+      var li = document.createElement('li');
+      setInlineMarkdown(li, point);
+      ul.appendChild(li);
+    });
+    wrap.appendChild(ul);
+    return wrap;
+  }
+
+  function renderQuizBlock(block, ctx) {
+    var wrap = createBlockWrapper('block-quiz', ctx, 'quiz');
+    var question = document.createElement('p');
+    question.className = 'quiz-question';
+    setInlineMarkdown(question, block.question);
+    wrap.appendChild(question);
+
+    var optionsWrap = document.createElement('div');
+    optionsWrap.className = 'quiz-options';
+    var attempt = 0;
+
+    (block.options || []).forEach(function (opt, optIndex) {
+      var row = document.createElement('div');
+      var optEl = document.createElement('button');
+      optEl.type = 'button';
+      optEl.className = 'exercise-option';
+      setInlineMarkdown(optEl, opt.text);
+      var feedbackEl = document.createElement('div');
+      feedbackEl.className = 'quiz-option-feedback';
+      feedbackEl.hidden = true;
+      row.appendChild(optEl);
+      row.appendChild(feedbackEl);
+      optionsWrap.appendChild(row);
+
+      optEl.addEventListener('click', function () {
+        attempt += 1;
+        Array.prototype.forEach.call(optionsWrap.querySelectorAll('.exercise-option'), function (el) {
+          el.classList.remove('correct', 'incorrect');
+        });
+        Array.prototype.forEach.call(optionsWrap.querySelectorAll('.quiz-option-feedback'), function (el) {
+          el.hidden = true;
+        });
+        optEl.classList.add(opt.correct ? 'correct' : 'incorrect');
+        feedbackEl.hidden = false;
+        setInlineMarkdown(feedbackEl, opt.feedback || (opt.correct ? 'Correct.' : 'Not quite — try another option.'));
+        emitEvent('quiz-answered', ctx.sectionId, ctx.blockIndex, { optionIndex: optIndex, correct: !!opt.correct, attempt: attempt });
+        if (opt.correct) markSectionProgress(ctx.sectionId, 'done');
+      });
+    });
+    wrap.appendChild(optionsWrap);
+    return wrap;
+  }
+
+  // One-shot analysis independent of any board widget/visibility wiring —
+  // used by the exercise "engine says" fallback and the compare block's
+  // live-eval-when-not-authored path, where a single answer is wanted
+  // rather than continuous re-analysis of a board on screen.
+  function analyzeOnce(fen, depth) {
+    return new Promise(function (resolve) {
+      if (Engine.isAvailable() === false) { resolve(null); return; }
+      var turnIsWhite = fen.split(' ')[1] === 'w';
+      Engine.request(fen, {
+        depth: depth || 14,
+        multipv: 1,
+        onBest: function (best, lines) {
+          var top = lines[0];
+          if (!top) { resolve(null); return; }
+          var norm = normalizeToWhite(top.cp, top.mate, turnIsWhite);
+          resolve({ best: best, cpWhite: norm.cp, mateWhite: norm.mate, depth: top.depth, pv: top.pv });
+        },
+      });
+    });
+  }
+
+  function renderBoardBlock(block, ctx) {
+    var wrap = createBlockWrapper('block-board', ctx, 'board');
+    var card = document.createElement('div');
+    card.className = 'board-card';
+
+    var exploredMoves = [];
+    var positions = null;
+    var moveObjs = null;
+    var currentStep = 0;
+
+    var widget = createBoardWidget({
+      fen: block.fen,
+      orientation: block.orientation,
+      interactive: !!block.interactive,
+      arrows: block.arrows,
+      highlights: block.highlights,
+      ariaPrefix: ctx.sectionHeading + ' board',
+      onMove: function (result) {
+        exploredMoves.push(result.san);
+        emitEvent('line-explored', ctx.sectionId, ctx.blockIndex, {
+          startFen: positions ? positions[currentStep] : block.fen,
+          moves: exploredMoves.slice(),
+        });
+        if (analysisCtl) analysisCtl.refresh();
+      },
+    });
+
+    var row = document.createElement('div');
+    row.className = 'board-row';
+    row.appendChild(widget.el);
+
+    var analysisCtl = null;
+    if (block.analysis !== 'off') {
+      analysisCtl = attachLiveAnalysis(widget, { depth: 18, multipv: 3 });
+      row.appendChild(analysisCtl.evalBarEl);
+    }
+    card.appendChild(row);
+    card.appendChild(widget.statusEl);
+    card.appendChild(widget.promoPicker);
+    if (analysisCtl) card.appendChild(analysisCtl.topLinesEl);
+    card.appendChild(engineUnavailableNote());
+
+    var moveListEl = null;
+    var prevBtn = null;
+    var nextBtn = null;
+
+    function gotoStep(step) {
+      currentStep = clamp(step, 0, moveObjs.length);
+      widget.setFen(positions[currentStep]);
+      exploredMoves = [];
+      if (analysisCtl) analysisCtl.refresh();
+      renderMoveList();
+      prevBtn.disabled = currentStep === 0;
+      nextBtn.disabled = currentStep === moveObjs.length;
+    }
+
+    function renderMoveList() {
+      moveListEl.innerHTML = '';
+      var startPly = (block.line && block.line.startPly) || 0;
+      for (var i = 0; i < moveObjs.length; i++) {
+        var pairEl = document.createElement('span');
+        pairEl.className = 'move-pair';
+        var isWhiteMove = (startPly + i) % 2 === 0;
+        if (isWhiteMove) {
+          var num = document.createElement('span');
+          num.className = 'move-num';
+          num.textContent = (Math.floor((startPly + i) / 2) + 1) + '.';
+          pairEl.appendChild(num);
+        }
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'move-chip' + (i + 1 === currentStep ? ' current' : '');
+        chip.textContent = moveObjs[i].san;
+        chip.addEventListener('click', (function (idx) { return function () { gotoStep(idx + 1); }; })(i));
+        pairEl.appendChild(chip);
+        moveListEl.appendChild(pairEl);
+      }
+    }
+
+    if (block.line && Array.isArray(block.line.moves) && block.line.moves.length) {
+      var replay = Chess(block.fen);
+      positions = [block.fen];
+      moveObjs = [];
+      block.line.moves.forEach(function (san) {
+        var result = replay.move(san, { sloppy: true });
+        if (result) { moveObjs.push(result); positions.push(replay.fen()); }
+      });
+
+      var controls = document.createElement('div');
+      controls.className = 'board-controls';
+      prevBtn = document.createElement('button');
+      prevBtn.type = 'button'; prevBtn.className = 'board-btn'; prevBtn.textContent = '‹ Prev';
+      prevBtn.setAttribute('aria-label', 'Previous move in the line');
+      nextBtn = document.createElement('button');
+      nextBtn.type = 'button'; nextBtn.className = 'board-btn'; nextBtn.textContent = 'Next ›';
+      nextBtn.setAttribute('aria-label', 'Next move in the line');
+      controls.appendChild(prevBtn);
+      controls.appendChild(nextBtn);
+      card.appendChild(controls);
+
+      moveListEl = document.createElement('div');
+      moveListEl.className = 'move-list';
+      card.appendChild(moveListEl);
+
+      prevBtn.addEventListener('click', function () { gotoStep(currentStep - 1); });
+      nextBtn.addEventListener('click', function () { gotoStep(currentStep + 1); });
+      card.setAttribute('tabindex', '0');
+      card.addEventListener('keydown', function (ev) {
+        if (ev.key === 'ArrowLeft') { ev.preventDefault(); gotoStep(currentStep - 1); }
+        else if (ev.key === 'ArrowRight') { ev.preventDefault(); gotoStep(currentStep + 1); }
+      });
+      gotoStep(0);
+    }
+
+    if (block.interactive) {
+      var resetBtn = document.createElement('button');
+      resetBtn.type = 'button';
+      resetBtn.className = 'board-btn';
+      resetBtn.textContent = 'Reset to position';
+      resetBtn.addEventListener('click', function () {
+        var basePos = positions ? positions[currentStep] : block.fen;
+        widget.setFen(basePos);
+        exploredMoves = [];
+        if (analysisCtl) analysisCtl.refresh();
+      });
+      var resetRow = document.createElement('div');
+      resetRow.className = 'board-controls';
+      resetRow.appendChild(resetBtn);
+      card.appendChild(resetRow);
+    }
+
+    if (block.caption) {
+      var cap = document.createElement('p');
+      cap.className = 'board-caption';
+      escapeText(cap, block.caption);
+      card.appendChild(cap);
+    }
+
+    wrap.appendChild(card);
+    return wrap;
+  }
+
+  function renderCompareSide(side, orientation) {
+    var col = document.createElement('div');
+    var label = document.createElement('div');
+    label.className = 'compare-label';
+    escapeText(label, side.label || '');
+    col.appendChild(label);
+
+    var card = document.createElement('div');
+    card.className = 'board-card';
+    var widget = createBoardWidget({ fen: side.fen, orientation: orientation, interactive: false, ariaPrefix: side.label || 'Position' });
+    card.appendChild(widget.el);
+    if (side.caption) {
+      var cap = document.createElement('p');
+      cap.className = 'board-caption';
+      escapeText(cap, side.caption);
+      card.appendChild(cap);
+    }
+    col.appendChild(card);
+
+    var evalEl = document.createElement('div');
+    evalEl.className = 'compare-eval';
+    if (typeof side.evalCp === 'number') {
+      evalEl.textContent = fmtScore(side.evalCp, null);
+    } else {
+      evalEl.textContent = '…';
+      analyzeOnce(side.fen, 14).then(function (result) {
+        evalEl.textContent = result ? (fmtScore(result.cpWhite, result.mateWhite) + '  (live, d' + result.depth + ')') : '';
+      });
+    }
+    col.appendChild(evalEl);
+    return col;
+  }
+
+  function renderCompareBlock(block, ctx) {
+    var wrap = createBlockWrapper('block-compare', ctx, 'compare');
+    var grid = document.createElement('div');
+    grid.className = 'compare-grid';
+    grid.appendChild(renderCompareSide(block.left || {}, block.orientation || 'white'));
+    grid.appendChild(renderCompareSide(block.right || {}, block.orientation || 'white'));
+    wrap.appendChild(grid);
+    if (block.note) {
+      var note = document.createElement('div');
+      note.className = 'compare-note';
+      renderMarkdownInto(note, block.note);
+      wrap.appendChild(note);
+    }
+    return wrap;
+  }
+
+  // =====================================================================
+  // Exercise block. The load-bearing rule from the design spec: the eval
+  // bar / top-lines panel for this block's board are created HIDDEN
+  // (`startHidden: true`) and only ever revealed from inside `commit()`,
+  // below — never left to the authored data to opt in or out of, so a
+  // puzzle can never accidentally degrade into "read the bar".
+  // =====================================================================
+
+  function normalizeAnswerText(s) {
+    return String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  function findMatchingAnswer(block, learnerValue) {
+    var answers = block.answers || [];
+    if (block.mode === 'move') {
+      for (var i = 0; i < answers.length; i++) {
+        if (answers[i].move && movesEquivalent(block.fen, learnerValue, answers[i].move)) return answers[i];
+      }
+    } else if (block.mode === 'text') {
+      var norm = normalizeAnswerText(learnerValue);
+      for (var j = 0; j < answers.length; j++) {
+        if (answers[j].text && normalizeAnswerText(answers[j].text) === norm) return answers[j];
+      }
+    } else if (block.mode === 'choice') {
+      for (var k = 0; k < answers.length; k++) {
+        if (answers[k].option === learnerValue) return answers[k];
+      }
+    }
+    return null;
+  }
+
+  function renderExerciseBlock(block, ctx) {
+    var wrap = createBlockWrapper('block-exercise', ctx, 'exercise');
+    var question = document.createElement('p');
+    question.className = 'exercise-question';
+    setInlineMarkdown(question, block.question);
+    wrap.appendChild(question);
+
+    var card = document.createElement('div');
+    card.className = 'board-card';
+    var row = document.createElement('div');
+    row.className = 'board-row';
+
+    var attempt = 0;
+    var solved = false;
+    var hintIndex = 0;
+
+    var widget = createBoardWidget({
+      fen: block.fen,
+      orientation: block.orientation,
+      interactive: block.mode === 'move',
+      ariaPrefix: 'Exercise board',
+      onMove: function (result) {
+        if (solved) return;
+        commit(result.san, result.san);
+      },
+    });
+    row.appendChild(widget.el);
+
+    var analysisCtl = attachLiveAnalysis(widget, { depth: 18, multipv: 3, startHidden: true });
+    row.appendChild(analysisCtl.evalBarEl);
+    card.appendChild(row);
+    card.appendChild(widget.statusEl);
+    card.appendChild(widget.promoPicker);
+    card.appendChild(analysisCtl.topLinesEl);
+    card.appendChild(engineUnavailableNote());
+    wrap.appendChild(card);
+
+    // --- mode-specific input ---
+    if (block.mode === 'text') {
+      var form = document.createElement('form');
+      form.className = 'exercise-text-form';
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = 'Your answer…';
+      input.autocomplete = 'off';
+      var submitBtn = document.createElement('button');
+      submitBtn.type = 'submit';
+      submitBtn.textContent = 'Check';
+      form.appendChild(input);
+      form.appendChild(submitBtn);
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        if (solved || !input.value.trim()) return;
+        commit(input.value.trim(), input.value.trim());
+      });
+      wrap.appendChild(form);
+    } else if (block.mode === 'choice') {
+      var optionsWrap = document.createElement('div');
+      optionsWrap.className = 'exercise-options';
+      (block.options || []).forEach(function (optionText) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'exercise-option';
+        setInlineMarkdown(btn, optionText);
+        btn.addEventListener('click', function () {
+          if (solved) return;
+          commit(optionText, optionText);
+        });
+        optionsWrap.appendChild(btn);
+      });
+      wrap.appendChild(optionsWrap);
+    }
+    // mode === 'move' has no separate input — moves are played on the board.
+
+    var attemptNote = document.createElement('p');
+    attemptNote.className = 'attempt-note';
+    attemptNote.hidden = true;
+    wrap.appendChild(attemptNote);
+
+    var feedbackEl = document.createElement('div');
+    feedbackEl.className = 'exercise-feedback';
+    feedbackEl.hidden = true;
+    wrap.appendChild(feedbackEl);
+
+    var engineFallbackEl = document.createElement('div');
+    engineFallbackEl.className = 'exercise-engine-fallback';
+    engineFallbackEl.hidden = true;
+    wrap.appendChild(engineFallbackEl);
+
+    var explanationEl = document.createElement('div');
+    explanationEl.className = 'exercise-explanation';
+    explanationEl.hidden = true;
+    wrap.appendChild(explanationEl);
+
+    // --- hint ladder ---
+    if (Array.isArray(block.hints) && block.hints.length) {
+      var hintLadder = document.createElement('div');
+      hintLadder.className = 'hint-ladder';
+      var hintBtn = document.createElement('button');
+      hintBtn.type = 'button';
+      hintBtn.className = 'hint-btn';
+      hintBtn.textContent = 'Hint (' + block.hints.length + ')';
+      hintLadder.appendChild(hintBtn);
+      wrap.appendChild(hintLadder);
+      hintBtn.addEventListener('click', function () {
+        if (hintIndex >= block.hints.length) return;
+        var hintEl = document.createElement('div');
+        hintEl.className = 'hint-item';
+        setInlineMarkdown(hintEl, block.hints[hintIndex]);
+        hintLadder.insertBefore(hintEl, hintBtn);
+        emitEvent('hint-revealed', ctx.sectionId, ctx.blockIndex, { index: hintIndex });
+        hintIndex += 1;
+        hintBtn.textContent = hintIndex >= block.hints.length ? 'No more hints' : 'Hint (' + (block.hints.length - hintIndex) + ' left)';
+        hintBtn.disabled = hintIndex >= block.hints.length;
+      });
+    }
+
+    function revealExplanation() {
+      if (block.explanation) {
+        explanationEl.hidden = false;
+        renderMarkdownInto(explanationEl, block.explanation);
+      }
+      if (block.engineLine) {
+        var line = document.createElement('p');
+        line.className = 'exercise-engine-fallback';
+        line.textContent = 'Authored engine line: ' + block.engineLine;
+        wrap.appendChild(line);
+      }
+    }
+
+    function showEngineFallback(playedFen, playedLabel) {
+      engineFallbackEl.hidden = false;
+      engineFallbackEl.textContent = 'Not one of the lines I anticipated — checking with the engine…';
+      Promise.all([analyzeOnce(block.fen, 18), playedFen ? analyzeOnce(playedFen, 18) : Promise.resolve(null)]).then(function (results) {
+        var bestInfo = results[0];
+        var playedInfo = results[1];
+        var parts = [];
+        if (bestInfo) {
+          parts.push('Engine best from here: ' + (bestInfo.best ? uciPvToSan(block.fen, [bestInfo.best]) : '?') + '  ' + fmtScore(bestInfo.cpWhite, bestInfo.mateWhite) + '  d' + bestInfo.depth + '.');
+        }
+        if (playedInfo && playedLabel) {
+          parts.push('Your move (' + playedLabel + '): ' + fmtScore(playedInfo.cpWhite, playedInfo.mateWhite) + '  d' + playedInfo.depth + '.');
+        }
+        engineFallbackEl.textContent = parts.join(' ') || 'The live engine is unavailable, so no automatic comparison here — ask the coach if you want to talk it through.';
+      });
+    }
+
+    function commit(learnerValue, displayLabel) {
+      attempt += 1;
+      attemptNote.hidden = false;
+      attemptNote.textContent = 'Attempt ' + attempt;
+
+      var matched = findMatchingAnswer(block, learnerValue);
+      var postMoveFen = block.mode === 'move' ? widget.getFen() : null;
+
+      emitEvent('exercise-attempted', ctx.sectionId, ctx.blockIndex, {
+        answer: learnerValue,
+        matched: !!matched,
+        correct: matched ? !!matched.correct : false,
+        attempt: attempt,
+      });
+
+      analysisCtl.setHidden(false);
+      analysisCtl.refresh();
+
+      feedbackEl.hidden = false;
+      engineFallbackEl.hidden = true;
+
+      // Where the move landed, so a verdict can be drawn on that square. The
+      // board is the thing the learner is looking at; making them find the
+      // answer in a paragraph below it wastes the moment right after they
+      // committed, which is when they are most receptive.
+      var landedOn = null;
+      if (block.mode === 'move') {
+        var played = widget.getChess().history({ verbose: true });
+        if (played.length) landedOn = played[played.length - 1].to;
+      }
+
+      function markWrongAndReset() {
+        if (landedOn) widget.setVerdict(landedOn, 'wrong');
+        setTimeout(function () {
+          if (solved) return;
+          widget.setVerdict(null);
+          widget.setFen(block.fen);
+        }, WRONG_MOVE_RESET_MS);
+      }
+
+      if (matched) {
+        feedbackEl.className = 'exercise-feedback ' + (matched.correct ? 'correct' : 'incorrect');
+        setInlineMarkdown(feedbackEl, matched.feedback || (matched.correct ? 'Correct.' : 'Not quite.'));
+        if (matched.correct) {
+          solved = true;
+          if (landedOn) widget.setVerdict(landedOn, 'right');
+          if (block.mode === 'move') widget.setInteractive(false);
+          revealExplanation();
+          emitEvent('exercise-solved', ctx.sectionId, ctx.blockIndex, { answer: learnerValue, attempt: attempt });
+          markSectionProgress(ctx.sectionId, 'done');
+        } else if (block.mode === 'move') {
+          markWrongAndReset();
+        }
+      } else {
+        feedbackEl.className = 'exercise-feedback fallback';
+        feedbackEl.textContent = 'Not one of the lines I anticipated.';
+        showEngineFallback(postMoveFen, displayLabel);
+        revealExplanation();
+        // An unanticipated move is still a wrong move: it got the same X and
+        // the same reset, rather than silently leaving the board changed.
+        if (block.mode === 'move') markWrongAndReset();
+      }
+    }
+
+    return wrap;
+  }
+
+  // =====================================================================
+  // Game block: full PGN viewer — board, clickable move list, an SVG eval
+  // graph across the whole game (white advantage above the midline, black
+  // below, clamped to ±5 pawns, mate shown at the clamp), classification
+  // dots for blunder/mistake/inaccuracy plies, and per-ply annotations.
+  // =====================================================================
+
+  function renderEvalGraph(game, block, onJump) {
+    var svgNs = 'http://www.w3.org/2000/svg';
+    var W = 600, H = 110, MID = H / 2;
+    var svg = document.createElementNS(svgNs, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('class', 'eval-graph');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Evaluation graph across the game — click to jump to a move');
+
+    var evalByPly = {};
+    (block.evalGraph || []).forEach(function (e) { evalByPly[e.ply] = e; });
+    var n = game.moves.length;
+
+    function xFor(ply) { return n <= 0 ? 0 : (ply / n) * W; }
+    function yFor(entry) {
+      var cp;
+      if (entry && typeof entry.mate === 'number' && entry.mate !== null) {
+        cp = entry.mate > 0 ? 500 : -500;
+      } else {
+        cp = clamp((entry && typeof entry.cp === 'number') ? entry.cp : 0, -500, 500);
+      }
+      return MID - (cp / 500) * MID;
+    }
+
+    var midline = document.createElementNS(svgNs, 'line');
+    midline.setAttribute('x1', 0); midline.setAttribute('y1', MID);
+    midline.setAttribute('x2', W); midline.setAttribute('y2', MID);
+    midline.setAttribute('class', 'midline');
+    svg.appendChild(midline);
+
+    var points = [[0, MID]];
+    for (var ply = 1; ply <= n; ply++) points.push([xFor(ply), yFor(evalByPly[ply])]);
+
+    if (points.length > 1) {
+      var areaPath = 'M0,' + MID + ' ' + points.map(function (p) { return 'L' + p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ') + ' L' + W + ',' + MID + ' Z';
+      var area = document.createElementNS(svgNs, 'path');
+      area.setAttribute('d', areaPath);
+      area.setAttribute('class', 'area-white');
+      svg.appendChild(area);
+
+      var line = document.createElementNS(svgNs, 'polyline');
+      line.setAttribute('points', points.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' '));
+      line.setAttribute('fill', 'none');
+      line.setAttribute('stroke', 'var(--accent)');
+      line.setAttribute('stroke-width', '1.5');
+      svg.appendChild(line);
+    }
+
+    for (var i = 1; i <= n; i++) {
+      var entry = evalByPly[i];
+      if (entry && ['blunder', 'mistake', 'inaccuracy'].indexOf(entry.classification) >= 0) {
+        var dot = document.createElementNS(svgNs, 'circle');
+        dot.setAttribute('cx', xFor(i));
+        dot.setAttribute('cy', yFor(entry));
+        dot.setAttribute('r', '3.2');
+        dot.setAttribute('fill', 'var(--eval-' + entry.classification + ')');
+        dot.style.cursor = 'pointer';
+        dot.setAttribute('role', 'button');
+        dot.setAttribute('aria-label', entry.classification + ' at move ' + i);
+        (function (targetPly) { dot.addEventListener('click', function (ev) { ev.stopPropagation(); onJump(targetPly); }); })(i);
+        svg.appendChild(dot);
+      }
+    }
+
+    var cursor = document.createElementNS(svgNs, 'line');
+    cursor.setAttribute('class', 'cursor-line');
+    cursor.setAttribute('y1', 0);
+    cursor.setAttribute('y2', H);
+    cursor.setAttribute('x1', 0);
+    cursor.setAttribute('x2', 0);
+    svg.appendChild(cursor);
+
+    svg.addEventListener('click', function (ev) {
+      var rect = svg.getBoundingClientRect();
+      var ratio = rect.width ? (ev.clientX - rect.left) / rect.width : 0;
+      onJump(clamp(Math.round(ratio * n), 0, n));
+    });
+
+    return {
+      el: svg,
+      setCursor: function (ply) {
+        var x = xFor(ply);
+        cursor.setAttribute('x1', x);
+        cursor.setAttribute('x2', x);
+      },
+    };
+  }
+
+  function renderGameBlock(block, ctx) {
+    var wrap = createBlockWrapper('block-game', ctx, 'game');
+    var game = parsePgn(block.pgn);
+    var currentPly = 0;
+
+    var card = document.createElement('div');
+    card.className = 'board-card wide';
+
+    if (block.headers && (block.headers.White || block.headers.Black)) {
+      var head = document.createElement('p');
+      head.className = 'board-caption';
+      var whiteText = (block.headers.White || 'White') + ' vs ' + (block.headers.Black || 'Black') + (block.headers.Result ? (' · ' + block.headers.Result) : '');
+      escapeText(head, whiteText);
+      card.appendChild(head);
+    }
+
+    var row = document.createElement('div');
+    row.className = 'board-row';
+    var widget = createBoardWidget({ fen: game.positions[0], orientation: block.orientation, interactive: false, ariaPrefix: 'Game board' });
+    row.appendChild(widget.el);
+    card.appendChild(row);
+    card.appendChild(widget.statusEl);
+
+    var graphWrap = document.createElement('div');
+    graphWrap.className = 'eval-graph-wrap';
+    var graphApi = renderEvalGraph(game, block, function (ply) { jumpTo(ply); });
+    graphWrap.appendChild(graphApi.el);
+    card.appendChild(graphWrap);
+
+    // Keyboard navigation existed but was invisible: nothing on the card said
+    // it was focusable or that the arrow keys did anything. Buttons make the
+    // same actions discoverable, and double as the touch affordance.
+    var nav = document.createElement('div');
+    nav.className = 'game-nav';
+    var navButtons = [
+      ['|\u25c0', 'Jump to start', function () { jumpTo(0); }],
+      ['\u25c0', 'Previous move', function () { jumpTo(currentPly - 1); }],
+      ['\u25b6', 'Next move', function () { jumpTo(currentPly + 1); }],
+      ['\u25b6|', 'Jump to end', function () { jumpTo(game.moves.length); }],
+    ].map(function (spec) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'game-nav-btn';
+      btn.textContent = spec[0];
+      btn.title = spec[1];
+      btn.setAttribute('aria-label', spec[1]);
+      btn.addEventListener('click', function () { spec[2](); card.focus(); });
+      nav.appendChild(btn);
+      return btn;
+    });
+    var plyCounter = document.createElement('span');
+    plyCounter.className = 'game-nav-counter';
+    nav.appendChild(plyCounter);
+    var navHint = document.createElement('span');
+    navHint.className = 'game-nav-hint';
+    navHint.textContent = 'or use \u2190 \u2192 when focused';
+    nav.appendChild(navHint);
+    card.appendChild(nav);
+
+    var moveListEl = document.createElement('div');
+    moveListEl.className = 'move-list';
+    card.appendChild(moveListEl);
+
+    var annotationEl = document.createElement('div');
+    annotationEl.className = 'annotation-note';
+    annotationEl.hidden = true;
+    card.appendChild(annotationEl);
+
+    var evalByPly = {};
+    (block.evalGraph || []).forEach(function (e) { evalByPly[e.ply] = e; });
+
+    var startParts = (game.startFen || '').split(' ');
+    var startColorWhite = startParts[1] !== 'b';
+    var startMoveNumber = Number(startParts[5]) || 1;
+
+    function renderMoveList() {
+      moveListEl.innerHTML = '';
+      var moveNumber = startMoveNumber;
+      var colorWhite = startColorWhite;
+      for (var i = 0; i < game.moves.length; i++) {
+        var ply = i + 1;
+        var pairEl = document.createElement('span');
+        pairEl.className = 'move-pair';
+        if (colorWhite) {
+          var num = document.createElement('span');
+          num.className = 'move-num';
+          num.textContent = moveNumber + '.';
+          pairEl.appendChild(num);
+        }
+        var entry = evalByPly[ply];
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        var chipClass = 'move-chip';
+        if (ply === currentPly) chipClass += ' current';
+        if (entry && ['blunder', 'mistake', 'inaccuracy'].indexOf(entry.classification) >= 0) chipClass += ' ' + entry.classification;
+        chip.className = chipClass;
+        chip.textContent = game.moves[i].san;
+        chip.addEventListener('click', (function (targetPly) { return function () { jumpTo(targetPly); }; })(ply));
+        pairEl.appendChild(chip);
+        moveListEl.appendChild(pairEl);
+        if (!colorWhite) moveNumber += 1;
+        colorWhite = !colorWhite;
+      }
+    }
+
+    function jumpTo(ply) {
+      currentPly = clamp(ply, 0, game.moves.length);
+      widget.setFen(game.positions[currentPly]);
+      renderMoveList();
+      graphApi.setCursor(currentPly);
+      var ann = block.annotations && block.annotations[String(currentPly)];
+      if (ann) { annotationEl.hidden = false; setInlineMarkdown(annotationEl, ann); }
+      else { annotationEl.hidden = true; }
+      plyCounter.textContent = currentPly + ' / ' + game.moves.length;
+      navButtons[0].disabled = navButtons[1].disabled = currentPly === 0;
+      navButtons[2].disabled = navButtons[3].disabled = currentPly === game.moves.length;
+      emitEvent('line-explored', ctx.sectionId, ctx.blockIndex, { ply: currentPly, san: currentPly > 0 ? game.moves[currentPly - 1].san : null });
+    }
+
+    card.setAttribute('tabindex', '0');
+    card.addEventListener('keydown', function (ev) {
+      if (ev.key === 'ArrowLeft') { ev.preventDefault(); jumpTo(currentPly - 1); }
+      else if (ev.key === 'ArrowRight') { ev.preventDefault(); jumpTo(currentPly + 1); }
+      else if (ev.key === 'Home') { ev.preventDefault(); jumpTo(0); }
+      else if (ev.key === 'End') { ev.preventDefault(); jumpTo(game.moves.length); }
+    });
+
+    renderMoveList();
+    graphApi.setCursor(0);
+    plyCounter.textContent = '0 / ' + game.moves.length;
+    navButtons[0].disabled = navButtons[1].disabled = true;
+    wrap.appendChild(card);
+    return wrap;
+  }
+
+  // =====================================================================
+  // Chapter assembly: header, sticky ToC / progress rail, sections, block
+  // dispatch, section-viewed telemetry via IntersectionObserver, reading
+  // progress, and a chapter-completed event fired once the learner
+  // scrolls to (near) the end of the document.
+  // =====================================================================
+
+  function prefersReducedMotion() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  function renderBlock(block, ctx) {
+    if (!block || typeof block.type !== 'string') return null;
+    switch (block.type) {
+      case 'prose': return renderProseBlock(block, ctx);
+      case 'callout': return renderCalloutBlock(block, ctx);
+      case 'board': return renderBoardBlock(block, ctx);
+      case 'game': return renderGameBlock(block, ctx);
+      case 'exercise': return renderExerciseBlock(block, ctx);
+      case 'compare': return renderCompareBlock(block, ctx);
+      case 'quiz': return renderQuizBlock(block, ctx);
+      case 'recap': return renderRecapBlock(block, ctx);
+      default: {
+        var warn = document.createElement('div');
+        warn.className = 'block block-unknown';
+        warn.textContent = 'Unrecognized block type: ' + block.type;
+        return warn;
+      }
+    }
+  }
+
+  // Populated by buildChapter(); read by markSectionProgress and the
+  // section IntersectionObserver. Declared with `var` so it's usable from
+  // block renderers defined earlier in this file regardless of source
+  // order (function/var hoisting within this IIFE's single scope).
+  var sectionMetaRegistry = {};
+
+  function markSectionProgress(sectionId, state) {
+    var meta = sectionMetaRegistry[sectionId];
+    if (!meta) return;
+    if (state === 'done') {
+      meta.done = true;
+      meta.statusDot.className = 'toc-status done';
+    } else if (state === 'visited' && !meta.done) {
+      meta.viewed = true;
+      meta.statusDot.className = 'toc-status visited';
+    }
+  }
+
+  function setupSectionObserver(sections) {
+    if (typeof IntersectionObserver === 'undefined') return;
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        var id = entry.target.getAttribute('data-section-id');
+        var meta = sectionMetaRegistry[id];
+        if (!meta) return;
+        if (entry.isIntersecting) {
+          meta.tocItem.classList.add('active');
+          if (!meta.viewed) {
+            meta.viewed = true;
+            if (!meta.done) meta.statusDot.className = 'toc-status visited';
+            emitEvent('section-viewed', id, null, {});
+          }
+        } else {
+          meta.tocItem.classList.remove('active');
+        }
+      });
+    }, { threshold: 0.3, rootMargin: '-10% 0px -55% 0px' });
+    sections.forEach(function (section, i) {
+      var id = section.id || ('section-' + i);
+      var meta = sectionMetaRegistry[id];
+      if (meta) observer.observe(meta.sectionEl);
+    });
+  }
+
+  var chapterCompletedEmitted = false;
+  function updateReadingProgress() {
+    var doc = document.documentElement;
+    var scrollTop = window.scrollY || doc.scrollTop || 0;
+    var height = doc.scrollHeight - doc.clientHeight;
+    var pct = height > 0 ? clamp((scrollTop / height) * 100, 0, 100) : 0;
+    var fill = document.getElementById('reading-progress-fill');
+    if (fill) fill.style.width = pct + '%';
+    if (pct > 96 && !chapterCompletedEmitted && Object.keys(sectionMetaRegistry).length) {
+      chapterCompletedEmitted = true;
+      emitEvent('chapter-completed', null, null, {});
+    }
+  }
+  window.addEventListener('scroll', updateReadingProgress, { passive: true });
+  window.addEventListener('resize', updateReadingProgress);
+
+  function buildChapter(data) {
+    document.title = 'Studio — ' + (data.title || 'Chapter');
+    escapeText(document.getElementById('c-title'), data.title || 'Chapter');
+
+    var subtitleEl = document.getElementById('c-subtitle');
+    if (data.subtitle) { subtitleEl.hidden = false; escapeText(subtitleEl, data.subtitle); }
+    else { subtitleEl.hidden = true; }
+
+    var minutesEl = document.getElementById('c-minutes');
+    if (data.estimatedMinutes) { minutesEl.hidden = false; minutesEl.textContent = '~' + data.estimatedMinutes + ' min'; }
+    else { minutesEl.hidden = true; }
+
+    var provEl = document.getElementById('c-provenance');
+    if (data.provenance) {
+      var p = data.provenance;
+      var bits = [];
+      if (p.engine) bits.push(p.engine);
+      if (typeof p.depth === 'number') bits.push('depth ' + p.depth);
+      if (p.source) bits.push(p.source);
+      if (p.generatedAt) bits.push('generated ' + p.generatedAt);
+      provEl.hidden = bits.length === 0;
+      provEl.textContent = bits.join(' · ');
+    } else {
+      provEl.hidden = true;
+    }
+
+    var tocEl = document.getElementById('c-toc');
+    var contentEl = document.getElementById('c-content');
+    tocEl.innerHTML = '';
+    contentEl.innerHTML = '';
+    sectionMetaRegistry = {};
+    chapterCompletedEmitted = false;
+
+    var sections = Array.isArray(data.sections) ? data.sections : [];
+
+    sections.forEach(function (section, sIndex) {
+      var sectionId = section.id || ('section-' + sIndex);
+
+      var tocItem = document.createElement('button');
+      tocItem.type = 'button';
+      tocItem.className = 'toc-item';
+      var statusDot = document.createElement('span');
+      statusDot.className = 'toc-status';
+      var labelSpan = document.createElement('span');
+      labelSpan.className = 'toc-label';
+      escapeText(labelSpan, section.heading || ('Section ' + (sIndex + 1)));
+      tocItem.appendChild(statusDot);
+      tocItem.appendChild(labelSpan);
+      tocItem.addEventListener('click', function () {
+        var target = sectionMetaRegistry[sectionId].sectionEl;
+        target.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+      });
+      tocEl.appendChild(tocItem);
+
+      var sectionEl = document.createElement('section');
+      sectionEl.className = 'section';
+      sectionEl.id = 'sec-' + sectionId;
+      sectionEl.setAttribute('data-section-id', sectionId);
+      var heading = document.createElement('h2');
+      heading.className = 'section-heading';
+      escapeText(heading, section.heading || '');
+      sectionEl.appendChild(heading);
+
+      (Array.isArray(section.blocks) ? section.blocks : []).forEach(function (block, bIndex) {
+        var ctx = { sectionId: sectionId, sectionHeading: section.heading || '', blockIndex: bIndex };
+        var blockEl = renderBlock(block, ctx);
+        if (blockEl) sectionEl.appendChild(blockEl);
+      });
+
+      contentEl.appendChild(sectionEl);
+      sectionMetaRegistry[sectionId] = {
+        tocItem: tocItem, statusDot: statusDot, sectionEl: sectionEl,
+        viewed: false, done: false, index: sIndex,
+      };
+    });
+
+    setupSectionObserver(sections);
+  }
+
+  // =====================================================================
+  // Boot: hydrate the conversation panel, subscribe to live events, load
+  // the chapter payload, and start booting the engine (lazily — the first
+  // analyzable board to become visible will also trigger this, but kicking
+  // it off here means the multithreaded/single-thread feature detection
+  // and fallback has a head start before the learner reaches a board).
+  // =====================================================================
+
+  function onState(data) {
+    // A live state push carrying a full chapter payload (`sections`
+    // present) rebuilds the page in place, e.g. the agent authoring a
+    // follow-up section without a full reload. Anything else is ignored —
+    // chapter-shell has no other live-state fields today.
+    if (data && Array.isArray(data.sections)) {
+      buildChapter(data);
+      updateReadingProgress();
+    }
+  }
+
+  async function loadData() {
+    try {
+      var res = await fetch('/data');
+      if (res.ok) {
+        var data = await res.json();
+        buildChapter(data);
+        updateReadingProgress();
+      }
+    } catch (err) {
+      console.error('Could not load /data', err);
+    }
+  }
+
+  hydrateTranscript();
+  subscribeEvents(onState);
+  loadData();
+  Engine.boot();
+})();
+</script>
+</body>
+</html>

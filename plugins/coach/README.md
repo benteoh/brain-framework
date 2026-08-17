@@ -28,28 +28,32 @@ subfolder's contents or shape.
 
 The plugin manifest schema has no per-subskill enable/disable mechanism. Enabling `coach`
 installs `coach:chess` and `coach:language` together — an instance cannot install only one of
-the two. This is an accepted v0 tradeoff, not a bug: it's fine while both subskills stay
-markdown-only, and would only need revisiting if a subskill later grows a heavy runtime
-dependency (chess's eventual Stockfish/`chess.js` wiring, for example) that an instance wanting
-only the other subskill shouldn't have to install.
+the two.
 
-## Minimal implementation direction (chess)
+This remains acceptable because the heavy dependency chess now has is *not* installed with the
+plugin. `skills/chess/scripts/setup-engine.mjs` is an explicit, opt-in, one-time command that
+installs Stockfish and `chess.js` into the instance's `.brain/vendor/`. A learner who only uses
+`coach:language` never runs it and pays nothing.
 
-Keep bespoke code at integration boundaries:
+## Chess pipeline
 
-- use `chess.js` (or an equivalent replaceable rules adapter) for PGN/FEN parsing, legal moves,
-  and board state;
-- use a UCI Stockfish package or external engine adapter for deterministic evaluation;
-- use Chess.com's public data interfaces only for authorised game retrieval;
-- use Studio capabilities when installed for a board, arrows, highlighted squares, and
-  interaction;
-- fall back to PGN, FEN, diagrams, and Markdown when Studio is absent.
+Implemented, in `skills/chess/scripts/`:
 
-Do not implement chess rules, SAN parsing, or an engine in the plugin. Keep provider retrieval,
-rules, evaluation, pedagogy, and presentation behind separate interfaces so a dependency or
-platform can be replaced. This plugin ships the skill and capability contract, not the runtime
-adapters — the ingestion/analysis pipeline (`chess.js`/Stockfish wiring, PGN import) is a
-separate, later piece of work.
+- `setup-engine.mjs` — installs Stockfish (`stockfish` npm, WASM) and `chess.js` into
+  `.brain/vendor/`, prunes the full-net builds, and verifies with a real search.
+- `lib/engine.mjs` — UCI adapter. Owns the eval-convention normalisation (UCI reports
+  side-to-move-relative scores; everything above this layer sees white-relative) and serialises
+  searches so callers never manage engine state.
+- `chesscom.mjs` — retrieval only, from Chess.com's public API. No auth, no judgement.
+- `analyse.mjs` — two-pass engine analysis producing per-ply evidence plus aggregates.
+
+Stockfish is installed rather than vendored deliberately: it is GPL-3.0 and this repo is not, and
+the published package is 240 MB before pruning. The boundaries the original direction called for
+still hold — retrieval, rules, evaluation, pedagogy, and presentation stay behind separate
+interfaces, and no chess rules, SAN parsing, or engine logic is implemented here.
+
+Everything degrades to unaided judgement when the engine is not installed. That degradation must
+be stated to the learner, not silently papered over with a guess.
 
 ## Minimal implementation direction (language)
 

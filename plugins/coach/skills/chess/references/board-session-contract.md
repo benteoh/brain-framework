@@ -6,11 +6,17 @@ the board and the conversation. Nothing here hand-composes HTML — see the `stu
 (`plugins/studio/skills/studio/SKILL.md`) for the full shell inventory and the
 `/data`/`/state`/`/update` contract this depends on.
 
-Scope: this covers an interactive session where the learner explores or plays moves against a
-given position and the agent gives feedback — `board-shell` plus `chess.js` for legal-move UX
-only. It does not cover PGN/Chess.com import, Stockfish or any engine analysis, a persistent
-`Games/`/`Evidence` data pipeline, or opening theory content; those remain out of scope for this
-skill (see the scope boundary this doc's design spec calls out) and are not implemented here.
+Scope: this covers a **live drip session** where the learner plays moves against a given position
+and the agent replies turn by turn — `board-shell` plus `chess.js` for legal-move UX only.
+
+This is no longer the default shape for a teaching session. The core `learn` skill's chapter mode
+and `studio`'s `chapter-shell` carry the engine, the long-form content, and instant pre-authored
+feedback; prefer them unless live back-and-forth is genuinely the point (a drill, a Socratic
+walk-through of one position).
+
+Import and engine analysis are no longer out of scope for this skill — `scripts/chesscom.mjs` and
+`scripts/analyse.mjs` implement them — but they are not wired into *this* loop. `board-shell`
+still has no engine, and the sections below hold.
 
 ## Data and state shapes
 
