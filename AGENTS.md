@@ -51,3 +51,22 @@ Work through this loop when it serves the user's goal:
 Plugins provide tools, skills, schemas, renderers, or other capabilities. They do not dictate a fixed learning workflow. Optional capabilities progressively enhance a session and must have a documented fallback.
 
 Run `node skills/brain/scripts/brain.mjs validate` after structural framework changes.
+
+## Development environment
+
+- **WSL**: a Windows browser cannot reach the WSL distro's `localhost`. Get the
+  distro address with `hostname -I | awk '{print $1}'` and hand the user
+  `http://<that-ip>:<port>/<path>`, never a `localhost` URL.
+- **Serving the Studio component pages**: use
+  `node plugins/studio/scripts/dev-server.mjs`, not `python3 -m http.server`.
+  Two reasons, both of which cost a debugging session to learn:
+  - A static server rooted at the HTML's own directory cannot serve `../`.
+    `templates/*.html` import `../scripts/ui/*.mjs`, so serving from
+    `templates/` 404s every module. The dev server roots at `plugins/studio/`;
+    open the page at `/templates/<file>.html`.
+  - Python serves `.mjs` with the wrong MIME type (the browser refuses the
+    module) and lets the browser cache it (an edited component appears
+    unchanged). The dev server sets `text/javascript` and `no-store`.
+- Before handing over any local URL, check each sub-resource actually loads:
+  `curl -s -o /dev/null -w "%{http_code}" <url>`. A page that renders its own
+  chrome while every module 404s looks fine in a screenshot.
