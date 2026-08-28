@@ -370,6 +370,14 @@
   }
   .exercise-text-form button:hover, .quiz-retry:hover, .hint-btn:hover { filter: brightness(1.05); }
   .hint-btn:disabled { opacity: 0.4; cursor: default; }
+  /* Deliberately quieter than Check/Hint: giving up should be available, not
+     inviting. */
+  .reveal-btn {
+    margin-top: 0.7rem; padding: 0.4rem 0.8rem; border-radius: 0.5rem;
+    border: 1px solid var(--border); background: transparent; color: var(--muted);
+    font-size: 0.85rem; cursor: pointer;
+  }
+  .reveal-btn:hover { color: var(--fg); border-color: var(--chip-border); }
   .hint-ladder { margin-top: 0.7rem; display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; }
   .hint-item { background: var(--chip-bg); border: 1px solid var(--chip-border); border-radius: 0.5rem; padding: 0.5rem 0.7rem; font-size: 0.88rem; max-width: 68ch; }
   .exercise-feedback { margin-top: 0.85rem; padding: 0.7rem 0.9rem; border-radius: 0.5rem; font-size: 0.92rem; max-width: 68ch; }
@@ -438,7 +446,7 @@
   @media print {
     .reading-progress, .toc, .coach-toggle, .coach-drawer, .ask-about,
     .board-controls, .promotion-picker, .top-lines, .eval-bar-wrap,
-    .exercise-text-form, .hint-btn, .quiz-retry { display: none !important; }
+    .exercise-text-form, .hint-btn, .quiz-retry, .reveal-btn { display: none !important; }
     .chapter-layout { grid-template-columns: 1fr; display: block; }
     body { background: #fff; color: #000; }
     .board-card { box-shadow: none; border: 1px solid #999; break-inside: avoid; }
@@ -3437,18 +3445,32 @@ const Chess = function (fen) {
   // used by the exercise "engine says" fallback and the compare block's
   // live-eval-when-not-authored path, where a single answer is wanted
   // rather than continuous re-analysis of a board on screen.
+  // Bounded, because the queue supersedes a pending request rather than
+  // queueing it: if another board asks for analysis first, this request's
+  // onBest never fires at all, and an unbounded promise leaves the learner
+  // looking at "checking with the engine…" for the rest of the session.
+  var ANALYZE_ONCE_TIMEOUT_MS = 15000;
+
   function analyzeOnce(fen, depth) {
     return new Promise(function (resolve) {
       if (Engine.isAvailable() === false) { resolve(null); return; }
+      var settled = false;
+      function settle(value) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      }
+      var timer = setTimeout(function () { settle(null); }, ANALYZE_ONCE_TIMEOUT_MS);
       var turnIsWhite = fen.split(' ')[1] === 'w';
       Engine.request(fen, {
         depth: depth || 14,
         multipv: 1,
         onBest: function (best, lines) {
           var top = lines[0];
-          if (!top) { resolve(null); return; }
+          if (!top) { settle(null); return; }
           var norm = normalizeToWhite(top.cp, top.mate, turnIsWhite);
-          resolve({ best: best, cpWhite: norm.cp, mateWhite: norm.mate, depth: top.depth, pv: top.pv });
+          settle({ best: best, cpWhite: norm.cp, mateWhite: norm.mate, depth: top.depth, pv: top.pv });
         },
       });
     });
@@ -3690,6 +3712,7 @@ const Chess = function (fen) {
 
     var attempt = 0;
     var solved = false;
+    var revealed = false;
     var hintIndex = 0;
 
     var widget = createBoardWidget({
@@ -3793,6 +3816,44 @@ const Chess = function (fen) {
       });
     }
 
+    // --- give up ---
+    // Without this an unsolved exercise is a dead end: the learner cannot see
+    // the answer, cannot mark the section done, and the only exit is to guess
+    // until something sticks. It is deliberately a separate, explicit act
+    // rather than something a wrong attempt triggers, so that choosing to stop
+    // working on a problem is visible to the learner and to the debrief.
+    var revealBtn = document.createElement('button');
+    revealBtn.type = 'button';
+    revealBtn.className = 'reveal-btn';
+    revealBtn.textContent = 'Show me the answer';
+    revealBtn.hidden = true;
+    wrap.appendChild(revealBtn);
+    revealBtn.addEventListener('click', function () {
+      if (solved || revealed) return;
+      closeExercise('revealed');
+      emitEvent('exercise-revealed', ctx.sectionId, ctx.blockIndex, { attempt: attempt, hintsUsed: hintIndex });
+    });
+
+    // Closing is the single place the answer becomes visible: the authored
+    // explanation, and the engine's own read of the position. Both stay hidden
+    // while the exercise is still live, because an exercise whose answer is one
+    // wrong guess or one glance at the eval bar away is not an exercise.
+    function closeExercise(how) {
+      if (how === 'solved') solved = true;
+      else revealed = true;
+      revealBtn.hidden = true;
+      if (block.mode === 'move') widget.setInteractive(false);
+      analysisCtl.setHidden(false);
+      analysisCtl.refresh();
+      if (pendingBestMove) {
+        engineFallbackEl.hidden = false;
+        engineFallbackEl.textContent = engineFallbackEl.textContent + ' The engine plays ' + pendingBestMove + '.';
+        pendingBestMove = null;
+      }
+      revealExplanation();
+      markSectionProgress(ctx.sectionId, 'done');
+    }
+
     function revealExplanation() {
       if (block.explanation) {
         explanationEl.hidden = false;
@@ -3806,21 +3867,50 @@ const Chess = function (fen) {
       }
     }
 
+    // The unanticipated-answer path. It has to say something useful without
+    // becoming a way to buy the answer: naming the engine's best move here
+    // would make one throwaway move the cheapest route to the solution. So it
+    // reports what the learner's move cost against the best available and
+    // leaves the move itself behind the reveal button. `bestMoveNote` holds
+    // that move for closeExercise() to show once the learner has stopped
+    // trying.
+    var pendingBestMove = null;
+
     function showEngineFallback(playedFen, playedLabel) {
       engineFallbackEl.hidden = false;
       engineFallbackEl.textContent = 'Not one of the lines I anticipated — checking with the engine…';
       Promise.all([analyzeOnce(block.fen, 18), playedFen ? analyzeOnce(playedFen, 18) : Promise.resolve(null)]).then(function (results) {
         var bestInfo = results[0];
         var playedInfo = results[1];
+        if (!bestInfo && !playedInfo) {
+          engineFallbackEl.textContent = 'The live engine is unavailable, so no automatic comparison here — ask the coach if you want to talk it through.';
+          return;
+        }
+        if (bestInfo && bestInfo.best) pendingBestMove = uciPvToSan(block.fen, [bestInfo.best]);
         var parts = [];
-        if (bestInfo) {
-          parts.push('Engine best from here: ' + (bestInfo.best ? uciPvToSan(block.fen, [bestInfo.best]) : '?') + '  ' + fmtScore(bestInfo.cpWhite, bestInfo.mateWhite) + '  d' + bestInfo.depth + '.');
-        }
         if (playedInfo && playedLabel) {
-          parts.push('Your move (' + playedLabel + '): ' + fmtScore(playedInfo.cpWhite, playedInfo.mateWhite) + '  d' + playedInfo.depth + '.');
+          parts.push('Your move (' + playedLabel + ') is worth ' + fmtScore(playedInfo.cpWhite, playedInfo.mateWhite) + ' at depth ' + playedInfo.depth + '.');
         }
-        engineFallbackEl.textContent = parts.join(' ') || 'The live engine is unavailable, so no automatic comparison here — ask the coach if you want to talk it through.';
+        if (bestInfo) {
+          parts.push('The best move here is worth ' + fmtScore(bestInfo.cpWhite, bestInfo.mateWhite) + ' at depth ' + bestInfo.depth + '.');
+          if (playedInfo) {
+            var loss = evalLossCp(bestInfo, playedInfo, block.fen);
+            if (loss !== null) parts.push(loss < 25 ? 'That is close enough to be a real alternative.' : 'That is a gap of about ' + (loss / 100).toFixed(1) + ' pawns — there is more here.');
+          }
+        }
+        engineFallbackEl.textContent = parts.join(' ');
+      }, function () {
+        engineFallbackEl.textContent = 'The engine did not answer in time, so no automatic comparison here — ask the coach if you want to talk it through.';
       });
+    }
+
+    // Both scores are white-relative, so the mover's loss is the drop in their
+    // own direction. Mate scores are not centipawns and are not subtracted.
+    function evalLossCp(bestInfo, playedInfo, fen) {
+      if (bestInfo.mateWhite != null || playedInfo.mateWhite != null) return null;
+      if (bestInfo.cpWhite == null || playedInfo.cpWhite == null) return null;
+      var sign = fen.split(' ')[1] === 'w' ? 1 : -1;
+      return Math.max(0, (bestInfo.cpWhite - playedInfo.cpWhite) * sign);
     }
 
     function commit(learnerValue, displayLabel) {
@@ -3837,9 +3927,6 @@ const Chess = function (fen) {
         correct: matched ? !!matched.correct : false,
         attempt: attempt,
       });
-
-      analysisCtl.setHidden(false);
-      analysisCtl.refresh();
 
       feedbackEl.hidden = false;
       engineFallbackEl.hidden = true;
@@ -3867,20 +3954,22 @@ const Chess = function (fen) {
         feedbackEl.className = 'exercise-feedback ' + (matched.correct ? 'correct' : 'incorrect');
         setInlineMarkdown(feedbackEl, matched.feedback || (matched.correct ? 'Correct.' : 'Not quite.'));
         if (matched.correct) {
-          solved = true;
           if (landedOn) widget.setVerdict(landedOn, 'right');
-          if (block.mode === 'move') widget.setInteractive(false);
-          revealExplanation();
+          closeExercise('solved');
           emitEvent('exercise-solved', ctx.sectionId, ctx.blockIndex, { answer: learnerValue, attempt: attempt });
-          markSectionProgress(ctx.sectionId, 'done');
-        } else if (block.mode === 'move') {
-          markWrongAndReset();
+        } else {
+          // An anticipated wrong answer is the one case worth the most: the
+          // author already wrote feedback for exactly this misconception, and
+          // the learner can now use it on a retry. So the exercise stays open
+          // and the answer stays hidden.
+          revealBtn.hidden = false;
+          if (block.mode === 'move') markWrongAndReset();
         }
       } else {
         feedbackEl.className = 'exercise-feedback fallback';
         feedbackEl.textContent = 'Not one of the lines I anticipated.';
         showEngineFallback(postMoveFen, displayLabel);
-        revealExplanation();
+        revealBtn.hidden = false;
         // An unanticipated move is still a wrong move: it got the same X and
         // the same reset, rather than silently leaving the board changed.
         if (block.mode === 'move') markWrongAndReset();

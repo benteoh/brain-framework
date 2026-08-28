@@ -3,6 +3,7 @@ import { parsePgn } from './pgn-parser.mjs'
 import { analyzeOnce } from './engine-fallback.mjs'
 import { fmtScore, uciPvToSan, clamp } from './eval-bar.mjs'
 import { renderMarkdownInto, escapeText } from './markdown.mjs'
+import { createAskAboutButton } from './shared-utils.mjs'
 
 export function createGameViewer(block, ctx, emitEvent) {
   const wrap = document.createElement('div')
@@ -203,13 +204,4 @@ function renderEvalGraph(game, block, onJump) {
   })
 
   return { el: svg, setCursor: ply => { const x = xFor(ply); cursor.setAttribute('x1', x); cursor.setAttribute('x2', x) } }
-}
-
-function createAskAboutButton(sectionHeading, blockType, sectionId, blockIndex) {
-  const btn = document.createElement('button')
-  btn.type = 'button'; btn.className = 'ask-about'
-  btn.textContent = 'Ask about this'
-  btn.setAttribute('aria-label', 'Ask the coach about this ' + blockType + ' block')
-  btn.addEventListener('click', () => btn.dispatchEvent(new CustomEvent('ask-about', { detail: { sectionHeading, blockType, sectionId, blockIndex } })))
-  return btn
 }

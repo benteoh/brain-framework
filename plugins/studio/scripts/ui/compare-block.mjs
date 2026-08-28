@@ -2,6 +2,7 @@ import { createBoardWidget } from './board-widget-factory.mjs'
 import { analyzeOnce } from './engine-fallback.mjs'
 import { fmtScore } from './eval-bar.mjs'
 import { renderMarkdownInto, escapeText } from './markdown.mjs'
+import { createAskAboutButton } from './shared-utils.mjs'
 
 export function createCompareBlock(block, ctx) {
   const wrap = document.createElement('div')
@@ -53,13 +54,4 @@ function renderCompareSide(side, orientation) {
   }
   col.appendChild(evalEl)
   return col
-}
-
-function createAskAboutButton(sectionHeading, blockType, sectionId, blockIndex) {
-  const btn = document.createElement('button')
-  btn.type = 'button'; btn.className = 'ask-about'
-  btn.textContent = 'Ask about this'
-  btn.setAttribute('aria-label', 'Ask the coach about this ' + blockType + ' block')
-  btn.addEventListener('click', () => btn.dispatchEvent(new CustomEvent('ask-about', { detail: { sectionHeading, blockType, sectionId, blockIndex } })))
-  return btn
 }

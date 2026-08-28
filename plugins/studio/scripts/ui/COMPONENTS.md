@@ -158,14 +158,33 @@ const block = createExerciseBlock(
       feedback: string,             // Markdown feedback text.
     }>,
     hints: string[],                // Optional. Array of hint texts (progressive disclosure).
-    explanation: string,            // Optional. Markdown explanation shown after answer.
-    engineLine: string,             // Optional. Engine's best line (for fallback).
+    explanation: string,            // Optional. Markdown shown only once the exercise closes.
+    engineLine: string,             // Optional. Engine's best line, shown with the explanation.
   },
   ctx,                              // { sectionId, sectionHeading, blockIndex }
   emitEvent,                        // (event, sectionId, blockIndex, payload) => void
   markSectionProgress,              // (sectionId, state) => void
 )
 ```
+
+**When the answer becomes visible.** An exercise is either live or closed, and
+everything that gives the answer away is gated on closing: the eval bar and its
+top lines, the engine's best move, and `explanation`/`engineLine`. It closes on
+a correct answer, or when the learner presses **Show me the answer**. Nothing a
+wrong attempt does closes it — otherwise one throwaway move is the cheapest
+route to the solution, and the block stops testing retrieval.
+
+An answer the author did not anticipate still gets an engine reply, because
+that is the whole point of the fallback, but phrased as the gap it costs
+("worth −0.4 at depth 18; the best move here is worth +1.1") rather than the
+move that closes it. The move itself is held back until close.
+
+**Events**, all via `emitEvent`: `exercise-attempted` ({answer, matched,
+correct, attempt}), `exercise-solved` ({answer, attempt}), `exercise-revealed`
+({attempt, hintsUsed}), `hint-revealed` ({index}). `matched: false` means the
+author never considered this answer; `matched: true, correct: false` means they
+wrote feedback for exactly this mistake. A debrief that collapses solved-first-try,
+solved-after-hints and revealed into one score throws away the diagnosis.
 
 ---
 

@@ -22,6 +22,7 @@ Work through this loop when it serves the user's goal:
 - State uncertainty when a diagnosis is only a hypothesis.
 - Choose the smallest useful next practice rather than generating a complete curriculum upfront.
 - Agent-authored material is a claim awaiting a test, never evidence of learning. This holds however well made it is, and applies to the agent's own notes and explanations first.
+- Never make the answer cheaper to obtain than to derive. A practice surface that shows the solution, the evaluation, or the explanation in response to a wrong attempt has stopped testing retrieval and started testing patience. Reveal on an explicit request to stop working on the problem, and record that it was revealed — solved unaided and given up on are different results.
 - Keep the agent off the learner's critical path. Agent turns cost wall-clock the learner spends waiting, so prefer one substantial self-paced artifact with its feedback authored up front over a drip of prompts each gated on a reply. Reserve live back-and-forth for work that is genuinely conversational.
 
 "Smallest useful next practice" and "one substantial artifact" are not in tension: the unit is still the smallest thing that will move this learner, and the point of the second rule is that a unit should not be fragmented into round-trips. Do not read it as licence to generate a syllabus.
