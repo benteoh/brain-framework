@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
-import { defaultVendorDir, openEngine } from './lib/engine.mjs'
+import { defaultVendorDir, engineFlavourPath, openEngine } from './lib/engine.mjs'
 
 // Two-pass by design. Analysing every ply at full depth costs ~10x and teaches
 // nothing extra: the bulk pass locates where the game actually turned, and only
@@ -39,6 +39,29 @@ function winPercent(cp) {
 function moveAccuracy(before, after) {
   const drop = Math.max(0, before - after)
   return Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.04354 * drop) - 3.1669))
+}
+
+// A batch is tens of minutes of work, so the cost of finding out the engine is
+// missing or wedged should be paid in the first second, not after the first
+// game fails. The binary check comes first because that failure has a fix the
+// user can act on; the probe then proves the process actually searches.
+const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
+
+async function assertEngineInstalled(vendorDir, flavour) {
+  const enginePath = engineFlavourPath(vendorDir, flavour)
+  try {
+    await stat(enginePath)
+  } catch {
+    throw new Error(
+      `Stockfish ${flavour} not found at ${enginePath}. Run: node plugins/coach/skills/chess/scripts/setup-engine.mjs --flavour ${flavour}`,
+    )
+  }
+}
+
+async function probeEngine(engine) {
+  const probe = await engine.analyse(START_FEN, { depth: 8 })
+  if (!probe.bestMove) throw new Error(`Engine ${engine.name} returned no bestmove on the start position`)
+  console.error(`Pre-flight OK: ${engine.name} (flavour: ${engine.flavour}, threads: ${engine.threads})`)
 }
 
 function classify(cpLoss, wasBest) {
@@ -232,7 +255,10 @@ async function main(argv) {
   const require = createRequire(import.meta.url)
   const vendorDir = path.resolve(values.vendor ?? defaultVendorDir())
   const { Chess } = require(path.join(vendorDir, 'node_modules', 'chess.js'))
+
+  await assertEngineInstalled(vendorDir, values.flavour)
   const engine = await openEngine({ vendorDir, flavour: values.flavour })
+  await probeEngine(engine)
 
   const provenance = {
     engine: engine.name,

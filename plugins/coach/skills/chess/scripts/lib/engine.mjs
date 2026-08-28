@@ -174,7 +174,9 @@ export async function openEngine({ vendorDir = defaultVendorDir(), flavour = 'li
       return until((l) => l.startsWith('readyok'))
     },
     // Serialised: one search at a time per engine, so callers can fire and await
-    // without tracking engine state themselves.
+    // without tracking engine state themselves. The caller gets the rejection
+    // via the returned promise; `queue` is deliberately settled to `undefined`
+    // either way, so one failed search does not poison every later one.
     analyse(fen, options) {
       const result = queue.then(() => analyseNow(fen, options))
       queue = result.then(
