@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Studio — Component Gallery</title>
+<link rel="stylesheet" href="../scripts/ui/tokens.css" />
+<style>
+  /* Gallery-specific styles */
+  .gallery-header {
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-6) var(--space-6);
+  }
+  .gallery-title {
+    font-size: var(--text-3xl);
+    font-weight: var(--font-bold);
+    margin: 0 0 var(--space-2);
+  }
+  .gallery-subtitle {
+    color: var(--color-fg-muted);
+    font-size: var(--text-lg);
+    margin: 0 0 var(--space-6);
+  }
+  .gallery-controls {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .gallery-btn {
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-m);
+    background: var(--color-surface);
+    color: var(--color-fg);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    cursor: pointer;
+    transition: background var(--duration-fast) var(--ease-out);
+  }
+  .gallery-btn:hover {
+    background: var(--color-chip-bg);
+  }
+  .gallery-btn.active {
+    background: var(--color-accent);
+    color: var(--color-accent-fg);
+    border-color: var(--color-accent);
+  }
+
+  .gallery-main {
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: 0 var(--space-6) var(--space-16);
+  }
+
+  .gallery-section {
+    margin-bottom: var(--space-12);
+  }
+  .gallery-section-title {
+    font-size: var(--text-2xl);
+    font-weight: var(--font-bold);
+    margin: 0 0 var(--space-2);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .gallery-section-desc {
+    color: var(--color-fg-muted);
+    font-size: var(--text-sm);
+    margin: 0 0 var(--space-6);
+  }
+
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: var(--space-6);
+  }
+  .gallery-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-l);
+    padding: var(--space-5);
+    box-shadow: var(--elevation-1);
+  }
+  .gallery-card-title {
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--color-fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 var(--space-4);
+  }
+  .gallery-card-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  /* Board widget container */
+  .board-holder {
+    position: relative;
+    width: 100%;
+    max-width: 280px;
+    margin: 0 auto;
+  }
+  .board-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    touch-action: manipulation;
+  }
+  .board-svg rect.square {
+    cursor: pointer;
+  }
+  .board-svg.use.piece {
+    cursor: pointer;
+  }
+  .board-svg.readonly rect.square,
+  .board-svg.readonly use.piece {
+    cursor: default;
+  }
+  .board-status {
+    font-size: var(--text-sm);
+    color: var(--color-fg-muted);
+    min-height: 1.2rem;
+    text-align: center;
+    margin-top: var(--space-2);
+  }
+  .board-status.warn {
+    color: var(--color-danger);
+    font-weight: var(--font-semibold);
+  }
+
+  /* Eval bar */
+  .eval-bar-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    width: 2rem;
+  }
+  .eval-bar {
+    width: 1.25rem;
+    height: 12rem;
+    border-radius: var(--radius-s);
+    overflow: hidden;
+    border: 1px solid var(--color-board-border);
+    display: flex;
+    flex-direction: column-reverse;
+    background: var(--color-eval-black);
+  }
+  .eval-bar-fill {
+    width: 100%;
+    background: var(--color-eval-white);
+    height: 50%;
+    transition: height var(--duration-normal) var(--ease-out);
+  }
+  .eval-bar.thinking .eval-bar-fill {
+    animation: pulse 1.5s var(--ease-in-out) infinite;
+  }
+  .eval-label {
+    font-size: var(--text-xs);
+    color: var(--color-fg-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* Exercise block */
+  .exercise-question {
+    font-weight: var(--font-semibold);
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-base);
+  }
+  .exercise-options {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .exercise-option {
+    text-align: left;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    border-radius: var(--radius-m);
+    padding: var(--space-3) var(--space-4);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    transition: all var(--duration-fast) var(--ease-out);
+  }
+  .exercise-option:hover {
+    border-color: var(--color-chip-border);
+    background: var(--color-chip-bg);
+  }
+  .exercise-option.correct {
+    border-color: var(--color-verdict-right);
+    background: var(--color-callout-principle-bg);
+  }
+  .exercise-option.incorrect {
+    border-color: var(--color-verdict-wrong);
+    background: var(--color-callout-warning-bg);
+  }
+  .exercise-feedback {
+    margin-top: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-m);
+    font-size: var(--text-sm);
+    animation: slide-up var(--duration-normal) var(--ease-out);
+  }
+  .exercise-feedback.correct {
+    background: var(--color-callout-principle-bg);
+    border: 1px solid var(--color-callout-principle-border);
+  }
+  .exercise-feedback.incorrect {
+    background: var(--color-callout-warning-bg);
+    border: 1px solid var(--color-callout-warning-border);
+  }
+  .exercise-feedback.fallback {
+    background: var(--color-callout-theory-bg);
+    border: 1px solid var(--color-callout-theory-border);
+  }
+
+  /* Verdict markers */
+  .verdict {
+    animation: pop-in var(--duration-fast) var(--ease-spring);
+    transform-origin: center;
+  }
+
+  /* Piece animation */
+  use.piece {
+    transition: transform var(--duration-fast) var(--ease-out);
+  }
+
+  /* Callouts */
+  .callout {
+    border-radius: var(--radius-m);
+    padding: var(--space-4) var(--space-5);
+    border-left: 4px solid;
+  }
+  .callout-title {
+    font-weight: var(--font-bold);
+    margin: 0 0 var(--space-2);
+    font-size: var(--text-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .callout .prose {
+    font-size: var(--text-sm);
+  }
+  .callout-principle {
+    background: var(--color-callout-principle-bg);
+    border-color: var(--color-callout-principle-border);
+  }
+  .callout-principle .callout-title {
+    color: var(--color-callout-principle-border);
+  }
+  .callout-theory {
+    background: var(--color-callout-theory-bg);
+    border-color: var(--color-callout-theory-border);
+  }
+  .callout-theory .callout-title {
+    color: var(--color-callout-theory-border);
+  }
+  .callout-warning {
+    background: var(--color-callout-warning-bg);
+    border-color: var(--color-callout-warning-border);
+  }
+  .callout-warning .callout-title {
+    color: var(--color-callout-warning-border);
+  }
+  .callout-insight {
+    background: var(--color-callout-insight-bg);
+    border-color: var(--color-callout-insight-border);
+  }
+  .callout-insight .callout-title {
+    color: var(--color-callout-insight-border);
+  }
+
+  /* Prose */
+  .prose {
+    font-size: var(--text-base);
+    line-height: var(--leading-relaxed);
+  }
+  .prose p {
+    margin: 0 0 var(--space-3);
+  }
+
+  /* Recap */
+  .recap-list {
+    padding-left: var(--space-5);
+    margin: 0;
+  }
+  .recap-list li {
+    margin-bottom: var(--space-2);
+  }
+
+  /* Data payload display */
+  .data-payload {
+    margin-top: var(--space-4);
+    padding: var(--space-3);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-m);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--color-fg-muted);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 12rem;
+    overflow-y: auto;
+  }
+</style>
+</head>
+<body>
+<header class="gallery-header">
+  <h1 class="gallery-title">Studio Component Gallery</h1>
+  <p class="gallery-subtitle">Every component in every state. Use this to review UI quality and compose new chapters.</p>
+  <div class="gallery-controls">
+    <button class="gallery-btn" id="theme-toggle">Toggle Dark Mode</button>
+    <button class="gallery-btn" id="show-data-toggle">Show Data Payloads</button>
+  </div>
+</header>
+
+<main class="gallery-main">
+  <!-- Board Widget -->
+  <section class="gallery-section">
+    <h2 class="gallery-section-title">Board Widget</h2>
+    <p class="gallery-section-desc">The chessboard with move input, arrows, highlights, verdicts, and live analysis.</p>
+    <div class="gallery-grid" id="board-gallery"></div>
+  </section>
+
+  <!-- Eval Bar -->
+  <section class="gallery-section">
+    <h2 class="gallery-section-title">Eval Bar</h2>
+    <p class="gallery-section-desc">Evaluation display with thinking state, mate scores, and depth labels.</p>
+    <div class="gallery-grid" id="eval-gallery"></div>
+  </section>
+
+  <!-- Exercise Block -->
+  <section class="gallery-section">
+    <h2 class="gallery-section-title">Exercise Block</h2>
+    <p class="gallery-section-desc">Interactive exercises with feedback, hints, and engine fallback.</p>
+    <div class="gallery-grid" id="exercise-gallery"></div>
+  </section>
+
+  <!-- Callout Blocks -->
+  <section class="gallery-section">
+    <h2 class="gallery-section-title">Callout Blocks</h2>
+    <p class="gallery-section-desc">Principle, theory, warning, and insight callouts.</p>
+    <div class="gallery-grid" id="callout-gallery"></div>
+  </section>
+
+  <!-- Prose & Recap -->
+  <section class="gallery-section">
+    <h2 class="gallery-section-title">Prose & Recap</h2>
+    <p class="gallery-section-desc">Text content and summary lists.</p>
+    <div class="gallery-grid" id="text-gallery"></div>
+  </section>
+</main>
+
+<script type="module">
+import { createBoardWidget } from '../scripts/ui/board-widget-factory.mjs'
+import { createEvalBar } from '../scripts/ui/eval-bar.mjs'
+
+// Theme toggle
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  const html = document.documentElement
+  const current = html.style.colorScheme
+  html.style.colorScheme = current === 'dark' ? 'light' : 'dark'
+})
+
+// Data payload toggle
+let showData = false
+document.getElementById('show-data-toggle').addEventListener('click', (e) => {
+  showData = !showData
+  e.target.classList.toggle('active', showData)
+  document.querySelectorAll('.data-payload').forEach(el => {
+    el.style.display = showData ? 'block' : 'none'
+  })
+})
+
+// Helper to create a gallery card
+function createCard(title, content, data) {
+  const card = document.createElement('div')
+  card.className = 'gallery-card'
+  const titleEl = document.createElement('h3')
+  titleEl.className = 'gallery-card-title'
+  titleEl.textContent = title
+  card.appendChild(titleEl)
+
+  const contentEl = document.createElement('div')
+  contentEl.className = 'gallery-card-content'
+  contentEl.appendChild(content)
+  card.appendChild(contentEl)
+
+  if (data) {
+    const payload = document.createElement('pre')
+    payload.className = 'data-payload'
+    payload.style.display = 'none'
+    payload.textContent = JSON.stringify(data, null, 2)
+    card.appendChild(payload)
+  }
+  return card
+}
+
+// ========== BOARD WIDGET GALLERY ==========
+const boardGallery = document.getElementById('board-gallery')
+
+// Default board
+const board1 = createBoardWidget({ fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' })
+boardGallery.appendChild(createCard('Default Position', board1.el, { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' }))
+
+// Board with last move
+const board2 = createBoardWidget({ fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1' })
+board2.setLastMove('e2', 'e4')
+boardGallery.appendChild(createCard('With Last Move', board2.el, { fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1', lastMove: ['e2', 'e4'] }))
+
+// Board with check
+const board3 = createBoardWidget({ fen: 'rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2' })
+boardGallery.appendChild(createCard('With Check', board3.el, { fen: 'rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2' }))
+
+// Board with arrows
+const board4 = createBoardWidget({ fen: 'r1bqkbnr/pppppppp/2n5/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 1 2', arrows: [{ from: 'g1', to: 'f3' }] })
+boardGallery.appendChild(createCard('With Arrows', board4.el, { fen: 'r1bqkbnr/pppppppp/2n5/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 1 2', arrows: [{ from: 'g1', to: 'f3' }] }))
+
+// Board with highlights
+const board5 = createBoardWidget({ fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1', highlights: ['d5', 'e5', 'c5'] })
+boardGallery.appendChild(createCard('With Highlights', board5.el, { fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1', highlights: ['d5', 'e5', 'c5'] }))
+
+// Board with verdict (correct)
+const board6 = createBoardWidget({ fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1' })
+board6.setVerdict('e5', 'right')
+boardGallery.appendChild(createCard('Verdict: Correct', board6.el, { fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1', verdict: { square: 'e5', kind: 'right' } }))
+
+// Board with verdict (wrong)
+const board7 = createBoardWidget({ fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1' })
+board7.setVerdict('d6', 'wrong')
+boardGallery.appendChild(createCard('Verdict: Wrong', board7.el, { fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1', verdict: { square: 'd6', kind: 'wrong' } }))
+
+// Interactive board
+const board8 = createBoardWidget({ fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', interactive: true })
+boardGallery.appendChild(createCard('Interactive', board8.el, { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', interactive: true }))
+
+// ========== EVAL BAR GALLERY ==========
+const evalGallery = document.getElementById('eval-gallery')
+
+function createEvalCard(title, evalData) {
+  const bar = createEvalBar()
+  bar.update(evalData)
+  return createCard(title, bar.el, evalData)
+}
+
+evalGallery.appendChild(createEvalCard('Equal', { cpWhite: 0, depth: 18 }))
+evalGallery.appendChild(createEvalCard('White Slightly Better', { cpWhite: 50, depth: 18 }))
+evalGallery.appendChild(createEvalCard('Black Winning', { cpWhite: -300, depth: 18 }))
+evalGallery.appendChild(createEvalCard('White Mate in 3', { mateWhite: 3, depth: 18 }))
+evalGallery.appendChild(createEvalCard('Thinking', { cpWhite: 120, depth: 12, thinking: true }))
+evalGallery.appendChild(createEvalCard('No Engine', null))
+
+// ========== EXERCISE GALLERY ==========
+const exerciseGallery = document.getElementById('exercise-gallery')
+
+// Default exercise
+const ex1 = document.createElement('div')
+ex1.innerHTML = `
+  <p class="exercise-question">What is the best move for White?</p>
+  <div class="exercise-options">
+    <button class="exercise-option">Nf3</button>
+    <button class="exercise-option">e4</button>
+    <button class="exercise-option">d4</button>
+  </div>
+`
+exerciseGallery.appendChild(createCard('Default Exercise', ex1, { type: 'exercise', question: 'What is the best move for White?', options: ['Nf3', 'e4', 'd4'] }))
+
+// Exercise with correct feedback
+const ex2 = document.createElement('div')
+ex2.innerHTML = `
+  <p class="exercise-question">What is the best move for White?</p>
+  <div class="exercise-options">
+    <button class="exercise-option correct">Nf3</button>
+    <button class="exercise-option">e4</button>
+    <button class="exercise-option">d4</button>
+  </div>
+  <div class="exercise-feedback correct">Correct! Nf3 develops a piece and controls the center.</div>
+`
+exerciseGallery.appendChild(createCard('Correct Feedback', ex2))
+
+// Exercise with wrong feedback
+const ex3 = document.createElement('div')
+ex3.innerHTML = `
+  <p class="exercise-question">What is the best move for White?</p>
+  <div class="exercise-options">
+    <button class="exercise-option">Nf3</button>
+    <button class="exercise-option incorrect">e4</button>
+    <button class="exercise-option">d4</button>
+  </div>
+  <div class="exercise-feedback incorrect">Not quite. e4 opens the center too early here.</div>
+`
+exerciseGallery.appendChild(createCard('Wrong Feedback', ex3))
+
+// ========== CALLOUT GALLERY ==========
+const calloutGallery = document.getElementById('callout-gallery')
+
+function createCalloutCard(variant, title, body) {
+  const el = document.createElement('div')
+  el.className = `callout callout-${variant}`
+  el.innerHTML = `<div class="callout-title">${title}</div><div class="prose"><p>${body}</p></div>`
+  return createCard(variant.charAt(0).toUpperCase() + variant.slice(1), el, { type: 'callout', variant, title, body })
+}
+
+calloutGallery.appendChild(createCalloutCard('principle', 'Principle', 'Control the center in the opening.'))
+calloutGallery.appendChild(createCalloutCard('theory', 'Theory', 'The Sicilian Defense arises after 1.e4 c5.'))
+calloutGallery.appendChild(createCalloutCard('warning', 'Warning', 'Avoid moving the same piece twice in the opening.'))
+calloutGallery.appendChild(createCalloutCard('insight', 'Insight', 'Pawn structure determines the character of the position.'))
+
+// ========== TEXT GALLERY ==========
+const textGallery = document.getElementById('text-gallery')
+
+// Prose
+const prose = document.createElement('div')
+prose.className = 'prose'
+prose.innerHTML = '<p>The opening phase of a chess game is critical for establishing a strong position. Key principles include controlling the center, developing pieces, and ensuring king safety.</p>'
+textGallery.appendChild(createCard('Prose', prose, { type: 'prose', body: 'The opening phase...' }))
+
+// Recap
+const recap = document.createElement('div')
+recap.innerHTML = '<ul class="recap-list"><li>Control the center with pawns and pieces</li><li>Develop knights before bishops</li><li>Castle early to secure the king</li></ul>'
+textGallery.appendChild(createCard('Recap', recap, { type: 'recap', points: ['Control the center...', 'Develop knights...', 'Castle early...'] }))
+</script>
+</body>
+</html>

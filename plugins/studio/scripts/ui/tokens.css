@@ -1,0 +1,366 @@
+/*
+ * Studio Design Tokens
+ * Single source of truth for colors, spacing, radii, elevation, motion.
+ * Shared by all shells (chapter-shell, board-shell, gallery-shell, etc.)
+ */
+
+/* ---------- Color Palette ---------- */
+:root {
+  /* Surfaces */
+  --color-bg: #f6f6f4;
+  --color-surface: #ffffff;
+  --color-surface-2: #fbfbfa;
+  --color-border: #e2e2de;
+  --color-border-subtle: #eeece8;
+
+  /* Text */
+  --color-fg: #1b1b18;
+  --color-fg-muted: #66665f;
+  --color-fg-subtle: #999993;
+
+  /* Brand / Accent */
+  --color-accent: #0f766e;
+  --color-accent-fg: #ffffff;
+  --color-accent-hover: #0d6b63;
+  --color-accent-pressed: #0a5f58;
+
+  /* Chips / Tags */
+  --color-chip-bg: #eef2f0;
+  --color-chip-fg: #0f766e;
+  --color-chip-border: #cfe3de;
+
+  /* Semantic */
+  --color-danger: #b3261e;
+  --color-success: #1f9d55;
+  --color-warning: #c9852b;
+  --color-info: #2563a6;
+
+  /* Live indicators */
+  --color-live-ok: #1f9d55;
+  --color-live-bad: #b3261e;
+
+  /* Chess board */
+  --color-sq-light: #ebecd0;
+  --color-sq-dark: #739552;
+  --color-sq-coord-on-light: #739552;
+  --color-sq-coord-on-dark: #ebecd0;
+  --color-sq-lastmove: rgba(255, 214, 0, 0.42);
+  --color-sq-selected: #f2c94c;
+  --color-sq-legal: rgba(15, 118, 110, 0.55);
+  --color-sq-legal-capture: rgba(179, 38, 30, 0.55);
+  --color-sq-check: radial-gradient(circle, rgba(219,40,40,0.9) 0%, rgba(219,40,40,0.6) 45%, rgba(219,40,40,0) 72%);
+  --color-board-border: #33352f;
+
+  /* Arrows */
+  --color-arrow: rgba(15, 118, 110, 0.85);
+  --color-arrow-best: rgba(15, 118, 110, 0.9);
+
+  /* Highlight */
+  --color-highlight: rgba(242, 201, 76, 0.55);
+
+  /* Verdicts */
+  --color-verdict-right: #1f9d55;
+  --color-verdict-wrong: #d13438;
+
+  /* Callouts */
+  --color-callout-principle-bg: #eef2f0;
+  --color-callout-principle-border: #0f766e;
+  --color-callout-theory-bg: #eef4fb;
+  --color-callout-theory-border: #2563a6;
+  --color-callout-warning-bg: #fbeeee;
+  --color-callout-warning-border: #b3261e;
+  --color-callout-insight-bg: #f6f0fb;
+  --color-callout-insight-border: #7c3aed;
+
+  /* Eval */
+  --color-eval-white: #f6f6f4;
+  --color-eval-black: #33352f;
+  --color-eval-blunder: #b3261e;
+  --color-eval-mistake: #c9852b;
+  --color-eval-inaccuracy: #c9a92b;
+
+  /* ---------- Spacing Scale (4px base) ---------- */
+  --space-0: 0;
+  --space-1: 0.25rem;   /* 4px */
+  --space-2: 0.5rem;    /* 8px */
+  --space-3: 0.75rem;   /* 12px */
+  --space-4: 1rem;      /* 16px */
+  --space-5: 1.25rem;   /* 20px */
+  --space-6: 1.5rem;    /* 24px */
+  --space-8: 2rem;      /* 32px */
+  --space-10: 2.5rem;   /* 40px */
+  --space-12: 3rem;     /* 48px */
+  --space-16: 4rem;     /* 64px */
+
+  /* ---------- Border Radius ---------- */
+  --radius-s: 0.25rem;   /* 4px */
+  --radius-m: 0.5rem;    /* 8px */
+  --radius-l: 0.75rem;   /* 12px */
+  --radius-xl: 1rem;     /* 16px */
+  --radius-pill: 999px;
+
+  /* ---------- Elevation ---------- */
+  --elevation-1: 0 1px 2px rgba(20, 20, 15, 0.06), 0 2px 6px rgba(20, 20, 15, 0.04);
+  --elevation-2: 0 2px 4px rgba(20, 20, 15, 0.08), 0 4px 12px rgba(20, 20, 15, 0.06);
+  --elevation-3: 0 4px 8px rgba(20, 20, 15, 0.12), 0 8px 24px rgba(20, 20, 15, 0.08);
+
+  /* ---------- Typography ---------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, monospace;
+
+  /* Type scale (1.25 ratio) */
+  --text-xs: 0.75rem;    /* 12px */
+  --text-sm: 0.875rem;   /* 14px */
+  --text-base: 1rem;     /* 16px */
+  --text-lg: 1.125rem;   /* 18px */
+  --text-xl: 1.25rem;    /* 20px */
+  --text-2xl: 1.5rem;    /* 24px */
+  --text-3xl: 1.875rem;  /* 30px */
+
+  /* Line heights */
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+
+  /* Font weights */
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+
+  /* ---------- Motion ---------- */
+  --duration-instant: 100ms;
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --duration-slower: 500ms;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ---------- Focus ---------- */
+  --focus-ring: 2px solid var(--color-accent);
+  --focus-ring-offset: 2px;
+
+  /* ---------- Z-index ---------- */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-popover: 500;
+  --z-tooltip: 600;
+}
+
+/* ---------- Dark Mode ---------- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Surfaces */
+    --color-bg: #16171a;
+    --color-surface: #1e2024;
+    --color-surface-2: #1a1c1f;
+    --color-border: #33353a;
+    --color-border-subtle: #2a2c30;
+
+    /* Text */
+    --color-fg: #ececea;
+    --color-fg-muted: #a3a39c;
+    --color-fg-subtle: #6b6b66;
+
+    /* Brand / Accent */
+    --color-accent: #4fd1c5;
+    --color-accent-fg: #0b1f1c;
+    --color-accent-hover: #5ed9cd;
+    --color-accent-pressed: #3cc4b8;
+
+    /* Chips / Tags */
+    --color-chip-bg: #223330;
+    --color-chip-fg: #7ee8db;
+    --color-chip-border: #2f4a44;
+
+    /* Semantic */
+    --color-danger: #ff6b60;
+    --color-success: #3ddc84;
+    --color-warning: #e0a94a;
+    --color-info: #5b9bd9;
+
+    /* Live indicators */
+    --color-live-ok: #3ddc84;
+    --color-live-bad: #ff6b60;
+
+    /* Chess board */
+    --color-sq-light: #b3bd9a;
+    --color-sq-dark: #55704a;
+    --color-sq-coord-on-light: #55704a;
+    --color-sq-coord-on-dark: #d8e0c4;
+    --color-sq-lastmove: rgba(255, 214, 0, 0.30);
+    --color-sq-selected: #e0b23a;
+    --color-sq-legal: rgba(79, 209, 197, 0.55);
+    --color-sq-legal-capture: rgba(255, 107, 96, 0.55);
+    --color-sq-check: radial-gradient(circle, rgba(255,80,80,0.9) 0%, rgba(255,80,80,0.6) 45%, rgba(255,80,80,0) 72%);
+    --color-board-border: #0c0d0f;
+
+    /* Arrows */
+    --color-arrow: rgba(79, 209, 197, 0.85);
+    --color-arrow-best: rgba(79, 209, 197, 0.9);
+
+    /* Highlight */
+    --color-highlight: rgba(224, 178, 58, 0.45);
+
+    /* Verdicts */
+    --color-verdict-right: #2ea86a;
+    --color-verdict-wrong: #e0524f;
+
+    /* Callouts */
+    --color-callout-principle-bg: #182924;
+    --color-callout-principle-border: #4fd1c5;
+    --color-callout-theory-bg: #14202c;
+    --color-callout-theory-border: #5b9bd9;
+    --color-callout-warning-bg: #2b1a19;
+    --color-callout-warning-border: #ff6b60;
+    --color-callout-insight-bg: #221b2c;
+    --color-callout-insight-border: #b794f6;
+
+    /* Eval */
+    --color-eval-white: #ececea;
+    --color-eval-black: #0c0d0f;
+    --color-eval-blunder: #ff6b60;
+    --color-eval-mistake: #e0a94a;
+    --color-eval-inaccuracy: #d8c65a;
+
+    /* Elevation */
+    --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.2);
+    --elevation-2: 0 2px 4px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
+    --elevation-3: 0 4px 8px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* ---------- Base Reset ---------- */
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ---------- Reduced Motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------- Links ---------- */
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* ---------- Focus Visible ---------- */
+/* Universal focus ring for all interactive elements */
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-s);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Remove default focus for mouse users */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ---------- Buttons ---------- */
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ---------- Utility Classes ---------- */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Animation Keyframes ---------- */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes scale-in {
+  from { transform: scale(0.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes pop-in {
+  0% { transform: scale(0); opacity: 0; }
+  60% { transform: scale(1.1); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-6px); }
+}
