@@ -1,3 +1,14 @@
 node_modules/
 .DS_Store
 *.log
+
+# Studio build output. `plugins/studio/scripts/ui/*.mjs` is the source of truth;
+# anything inlined back out of it is a generated artifact, never a reviewable diff.
+plugins/studio/dist/
+*.bundled.html
+
+# Non-working bundler prototype. Kept on disk because a self-contained shell
+# built from scripts/ui/ will need one, but it silently emits a byte-identical
+# copy today (its match and replace regexes differ), and it imports `esbuild`,
+# which this repo declares nowhere. See COMPONENTS.md for what a real one owes.
+plugins/studio/scripts/build-shell.mjs

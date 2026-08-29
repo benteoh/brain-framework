@@ -21,6 +21,11 @@ Work through this loop when it serves the user's goal:
 - Record distilled insights and belief updates, not transcripts or source dumps.
 - State uncertainty when a diagnosis is only a hypothesis.
 - Choose the smallest useful next practice rather than generating a complete curriculum upfront.
+- Agent-authored material is a claim awaiting a test, never evidence of learning. This holds however well made it is, and applies to the agent's own notes and explanations first.
+- Never make the answer cheaper to obtain than to derive. A practice surface that shows the solution, the evaluation, or the explanation in response to a wrong attempt has stopped testing retrieval and started testing patience. Reveal on an explicit request to stop working on the problem, and record that it was revealed — solved unaided and given up on are different results.
+- Keep the agent off the learner's critical path. Agent turns cost wall-clock the learner spends waiting, so prefer one substantial self-paced artifact with its feedback authored up front over a drip of prompts each gated on a reply. Reserve live back-and-forth for work that is genuinely conversational.
+
+"Smallest useful next practice" and "one substantial artifact" are not in tension: the unit is still the smallest thing that will move this learner, and the point of the second rule is that a unit should not be fragmented into round-trips. Do not read it as licence to generate a syllabus.
 
 ## Ownership
 
@@ -47,3 +52,26 @@ Work through this loop when it serves the user's goal:
 Plugins provide tools, skills, schemas, renderers, or other capabilities. They do not dictate a fixed learning workflow. Optional capabilities progressively enhance a session and must have a documented fallback.
 
 Run `node skills/brain/scripts/brain.mjs validate` after structural framework changes.
+
+## Development environment
+
+- **WSL**: `http://localhost:<port>` from a Windows browser usually reaches a
+  server bound to loopback inside the distro, but not always — it depends on
+  the distro's networking mode. Offer both addresses rather than asserting
+  either: `localhost` first, and the distro address from
+  `hostname -I | awk '{print $1}'` as the fallback. A server that must be
+  reachable by the second one has to bind beyond loopback
+  (`serve.mjs --host 0.0.0.0`), which is an explicit opt-in, not a default.
+- **Serving the Studio component pages**: use
+  `node plugins/studio/scripts/dev-server.mjs`, not `python3 -m http.server`.
+  Two reasons, both of which cost a debugging session to learn:
+  - A static server rooted at the HTML's own directory cannot serve `../`.
+    `templates/*.html` import `../scripts/ui/*.mjs`, so serving from
+    `templates/` 404s every module. The dev server roots at `plugins/studio/`;
+    open the page at `/templates/<file>.html`.
+  - Python serves `.mjs` with the wrong MIME type (the browser refuses the
+    module) and lets the browser cache it (an edited component appears
+    unchanged). The dev server sets `text/javascript` and `no-store`.
+- Before handing over any local URL, check each sub-resource actually loads:
+  `curl -s -o /dev/null -w "%{http_code}" <url>`. A page that renders its own
+  chrome while every module 404s looks fine in a screenshot.

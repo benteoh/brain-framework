@@ -4,6 +4,16 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 
+const ASSET_CONTENT_TYPES = {
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.wasm': 'application/wasm',
+  '.json': 'application/json',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.woff2': 'font/woff2',
+}
+
 // Serves one local exercise HTML file plus a live, shared transcript: the page
 // posts learner messages to /submit, the agent posts its own replies to
 // /message (a separate local script, not exposed in the page's own UI), and
@@ -18,10 +28,20 @@ import { parseArgs } from 'node:util'
 // discriminator (`'chat'` vs `'state'`) so a single /events stream can carry
 // both; GET /transcript keeps returning only chat-kind history, in its
 // original shape, so existing consumers (Al Bar, say.mjs) are unaffected.
-export function createStudioServer({ htmlPath, transcriptPath, dataPath }) {
+export function createStudioServer({ htmlPath, transcriptPath, dataPath, assetsDir }) {
   const transcript = []
   const sseClients = new Set()
   let state = {}
+
+  // WebAssembly threads need SharedArrayBuffer, which browsers only expose to a
+  // cross-origin isolated document. Only sent when --assets is in play, so
+  // shells that ship no engine keep their existing header set.
+  const isolationHeaders = assetsDir
+    ? {
+        'Cross-Origin-Opener-Policy': 'same-origin',
+        'Cross-Origin-Embedder-Policy': 'require-corp',
+      }
+    : {}
 
   function broadcast(entry) {
     const payload = `data: ${JSON.stringify(entry)}\n\n`
@@ -68,12 +88,39 @@ export function createStudioServer({ htmlPath, transcriptPath, dataPath }) {
     if (req.method === 'GET' && (req.url === '/' || req.url === '')) {
       readFile(htmlPath, 'utf8').then(
         (html) => {
-          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...isolationHeaders })
           res.end(html)
         },
         (error) => {
           res.writeHead(404, { 'Content-Type': 'text/plain' })
           res.end(`Could not read ${htmlPath}: ${error.message}`)
+        },
+      )
+      return
+    }
+
+    if (req.method === 'GET' && assetsDir && req.url.startsWith('/assets/')) {
+      const requested = decodeURIComponent(req.url.slice('/assets/'.length).split('?')[0])
+      const resolved = path.resolve(assetsDir, requested)
+      // path.resolve collapses ".." before we ever touch the filesystem, so this
+      // compares the real target against the root rather than the raw request.
+      if (resolved !== assetsDir && !resolved.startsWith(assetsDir + path.sep)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' })
+        res.end('Forbidden')
+        return
+      }
+      readFile(resolved).then(
+        (body) => {
+          res.writeHead(200, {
+            'Content-Type': ASSET_CONTENT_TYPES[path.extname(resolved)] ?? 'application/octet-stream',
+            'Cross-Origin-Resource-Policy': 'same-origin',
+            ...isolationHeaders,
+          })
+          res.end(body)
+        },
+        () => {
+          res.writeHead(404, { 'Content-Type': 'text/plain' })
+          res.end(`No such asset: ${requested}`)
         },
       )
       return
@@ -185,12 +232,14 @@ async function main(argv) {
       html: { type: 'string' },
       out: { type: 'string' },
       data: { type: 'string' },
+      assets: { type: 'string' },
       port: { type: 'string', default: '4390' },
+      host: { type: 'string', default: '127.0.0.1' },
     },
   })
 
   if (!values.html || !values.out) {
-    console.error('Usage: serve.mjs --html <path> --out <path> [--data <path>] [--port N]')
+    console.error('Usage: serve.mjs --html <path> --out <path> [--data <path>] [--assets <dir>] [--port N] [--host ADDR]')
     process.exitCode = 1
     return
   }
@@ -199,9 +248,15 @@ async function main(argv) {
     htmlPath: path.resolve(values.html),
     transcriptPath: path.resolve(values.out),
     dataPath: values.data ? path.resolve(values.data) : undefined,
+    assetsDir: values.assets ? path.resolve(values.assets) : undefined,
   })
-  server.listen(Number(values.port), '127.0.0.1', () => {
-    console.log(`Studio exercise server listening on http://127.0.0.1:${values.port}/`)
+  // Loopback by default: a session transcript is the learner's, and nothing
+  // here authenticates. `--host` exists for the one case that cannot use
+  // loopback — a WSL distro whose Windows browser cannot reach it — and is an
+  // explicit opt-in to being reachable from the local network.
+  server.listen(Number(values.port), values.host, () => {
+    console.log(`Studio exercise server listening on http://${values.host}:${values.port}/`)
+    if (values.host !== '127.0.0.1') console.log(`  (bound beyond loopback — reachable by anything that can route to this host)`)
   })
 }
 

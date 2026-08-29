@@ -1,0 +1,204 @@
+{
+  "title": "Castle Early or Pay for It",
+  "subtitle": "A recurring king-safety pattern from your July games, worked from first principles",
+  "estimatedMinutes": 25,
+  "provenance": {
+    "engine": "Stockfish 18 Lite (wasm)",
+    "depth": 20,
+    "source": "chess.com/exampleuser 2026-07-01..2026-08-16",
+    "generatedAt": "2026-08-16T10:00:00Z"
+  },
+  "sections": [
+    {
+      "id": "the-pattern",
+      "heading": "The pattern in your games",
+      "blocks": [
+        {
+          "type": "prose",
+          "body": "## What the engine found\n\nAcross eleven of your July games as Black, the same shape recurs: you accept a piece sacrifice in the opening, your king ends up walking to the center of the board by move 7 or 8, and your evaluation never recovers even when the material comes back later.\n\nThis chapter works through **one concrete instance** of the pattern — the *Fried Liver Attack* — not because you'll face this exact line again, but because it's the cleanest possible demonstration of the underlying principle: an exposed king is a standing liability that doesn't go away just because you're materially fine.\n\nSee `[[Chess]]` in the vault for the running subject map this chapter feeds into.\n\nRelated reading: [Fried Liver Attack on Wikipedia](https://en.wikipedia.org/wiki/Fried_liver_attack)."
+        },
+        {
+          "type": "game",
+          "pgn": "[Event \"Practice\"]\n[White \"Coach\"]\n[Black \"Learner\"]\n[Result \"*\"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. Ng5 d5 5. exd5 Nxd5 6. Nxf7 Kxf7 7. Qf3+ Ke6 8. Nc3 Nb4 9. O-O c6 10. a3 Na6 *",
+          "headers": { "White": "Coach", "Black": "Learner", "Result": "*" },
+          "evalGraph": [
+            { "ply": 1, "cp": 20 },
+            { "ply": 2, "cp": 15 },
+            { "ply": 3, "cp": 25 },
+            { "ply": 4, "cp": 20 },
+            { "ply": 5, "cp": 35 },
+            { "ply": 6, "cp": 30 },
+            { "ply": 7, "cp": 45 },
+            { "ply": 8, "cp": 40 },
+            { "ply": 9, "cp": 55 },
+            { "ply": 10, "cp": -10, "classification": "inaccuracy" },
+            { "ply": 11, "cp": 340, "classification": "blunder" },
+            { "ply": 12, "cp": 360 },
+            { "ply": 13, "cp": 410 },
+            { "ply": 14, "cp": 430 },
+            { "ply": 15, "cp": 400 },
+            { "ply": 16, "cp": 420 },
+            { "ply": 17, "cp": 405 },
+            { "ply": 18, "cp": 415 },
+            { "ply": 19, "cp": 400 },
+            { "ply": 20, "cp": 410 }
+          ],
+          "annotations": {
+            "10": "This is the critical branch point. 5...Na5 or 5...Nxd5 followed by a quiet retreat both keep the position roughly equal. Accepting the complications with ...Nxd5 here is playable in engine lines but is extremely easy to misplay over the board.",
+            "11": "6.Nxf7 is the point of the whole line — White sacrifices a knight to drag the king into the open. From here every only-move Black finds just to survive costs tempo, and tempo in an open position is what actually loses the game, not the missing pawn.",
+            "14": "The king has now walked to e6 in the middlegame with the center still open. Material is roughly level, but Black's position is close to lost — this is the pattern this chapter is about."
+          }
+        },
+        {
+          "type": "callout",
+          "variant": "insight",
+          "title": "Insight",
+          "body": "The evaluation swing at ply 11 is the whole lesson in one number: **+55 to +340 in a single move**, and it happens the instant the black king loses its right to castle. Everything downstream is just working out how big the damage is — the decisive moment was earlier and structural, not tactical."
+        }
+      ]
+    },
+    {
+      "id": "why-it-matters",
+      "heading": "Why king safety compounds",
+      "blocks": [
+        {
+          "type": "callout",
+          "variant": "principle",
+          "body": "An exposed king costs you tempo on *every subsequent move*, because every move has to first ask \"does this hang my king\" before it can ask \"does this improve my position.\" That tax doesn't expire when the immediate tactics end."
+        },
+        {
+          "type": "callout",
+          "variant": "theory",
+          "body": "Castling isn't just king safety in isolation — it also connects your rooks. A king stuck in the center after move 6 usually means a rook stuck in a corner past move 20, too. The two costs compound."
+        },
+        {
+          "type": "board",
+          "fen": "r1bq1b1r/ppp2kpp/2n5/3np3/2B5/8/PPPP1PPP/RNBQK2R w KQ - 0 7",
+          "orientation": "white",
+          "caption": "Black just recaptured on f7 with the king. Material is level (Black is actually up a pawn here) but the position already favours White heavily.",
+          "highlights": ["f7", "e8"],
+          "arrows": [{ "from": "c4", "to": "e6", "color": "var(--danger)" }],
+          "analysis": "live"
+        },
+        {
+          "type": "quiz",
+          "question": "In the position above, what is White's single biggest structural advantage?",
+          "options": [
+            { "text": "White has more pawns", "correct": false, "feedback": "Material is actually roughly level here (Black is up a pawn) — the advantage isn't on the material scoreboard at all." },
+            { "text": "Black's king cannot castle and sits in the open center", "correct": true, "feedback": "Exactly — the king itself is the target, and every Black move now has to account for it." },
+            { "text": "White's bishop pair is stronger", "correct": false, "feedback": "Both sides still have their dark-squared bishop undeveloped; the bishop pair isn't the issue in this position." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "practice",
+      "heading": "Practice: castle before it's too late",
+      "blocks": [
+        {
+          "type": "exercise",
+          "fen": "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+          "orientation": "white",
+          "question": "It's move 4 for White in the Italian Game. Play the move that keeps the game solid and principled.",
+          "mode": "move",
+          "answers": [
+            { "move": "O-O", "correct": true, "feedback": "Yes — castle now, while it costs nothing, rather than later when it might cost a piece." },
+            { "move": "Ng5", "correct": false, "feedback": "This is the Fried Liver Attack move from the game above — sharp and objectively fine for engines, but it delays your own king safety and invites exactly the kind of complications this chapter is about. Not wrong, but not what this exercise is asking for." },
+            { "move": "d3", "correct": false, "feedback": "A reasonable quiet move, but it still leaves your own king in the center a move longer than necessary — castle first, build the center after." }
+          ],
+          "hints": [
+            "You have three developed minor pieces and an open path between king and rook on one side of the board.",
+            "The move doesn't develop a new piece or win material — it just makes a promise permanent."
+          ],
+          "explanation": "0-0 costs zero tempo relative to any other reasonable 4th move, and once played it can never be undone by a tactic. Every other candidate move leaves open the possibility that your opponent finds a way to keep your king in the center — 0-0 removes that possibility outright.",
+          "engineLine": "O-O Bc5 d3 d6"
+        },
+        {
+          "type": "exercise",
+          "fen": "r1bqkb1r/ppp2ppp/2n5/3np1N1/2B5/8/PPPP1PPP/RNBQK2R w KQkq - 0 6",
+          "orientation": "white",
+          "question": "White to move. Which continuation best matches the principle from this chapter — protect your own development tempo rather than grabbing material?",
+          "mode": "choice",
+          "options": ["Nxf7, sacrificing the knight for the king", "Nf3, retreating and staying solid", "Qh5, attacking f7 and g5 at once"],
+          "answers": [
+            { "option": "Nxf7, sacrificing the knight for the king", "correct": false, "feedback": "This is the Fried Liver sacrifice — engines rate it as strong, but it's a sharp, calculation-heavy path, which is a poor match for the low-risk principle this exercise is testing." },
+            { "option": "Nf3, retreating and staying solid", "correct": true, "feedback": "Correct — this keeps the position balanced without requiring you to calculate a forcing sequence over the board." },
+            { "option": "Qh5, attacking f7 and g5 at once", "correct": false, "feedback": "Black simply defends with ...g6, and now your queen is exposed to being harassed — this doesn't actually solve anything." }
+          ],
+          "hints": ["Ask which option you could play confidently with five seconds left on the clock."],
+          "explanation": "Both Nxf7 and Nf3 are 'engine-approved' in the sense that neither is losing, but they carry very different risk profiles for a human. Nf3 never requires you to calculate more than one move deep to stay safe; Nxf7 requires finding several only-moves in a row under time pressure. Prefer the low-variance option unless you have a specific, calculated reason not to."
+        },
+        {
+          "type": "exercise",
+          "fen": "r1bqkb1r/ppp2ppp/2n5/3np1N1/2B5/8/PPPP1PPP/RNBQK2R w KQkq - 0 6",
+          "orientation": "white",
+          "question": "In one short phrase: what long-term asset is White risking by playing 6.Nxf7 here, even though the engine likes the resulting position?",
+          "mode": "text",
+          "answers": [
+            { "text": "king safety", "correct": true, "feedback": "Right — White's own king also loses castling rights in some lines, and even when it doesn't, the position becomes sharp enough that one inaccuracy flips the evaluation." },
+            { "text": "the initiative", "correct": false, "feedback": "Close in spirit, but the specific asset this chapter is tracking is king safety, not tempo/initiative — they're related but not the same thing." }
+          ],
+          "hints": ["It's the same asset the rest of this chapter has been about."],
+          "explanation": "Sharp sacrificial lines like the Fried Liver put a premium on precise calculation from both sides. A single inaccuracy — by either player — can swing the evaluation by several hundred centipawns, because king safety, once compromised, is the kind of asset that doesn't get partial credit."
+        },
+        {
+          "type": "compare",
+          "orientation": "white",
+          "left": {
+            "fen": "r1bq1b1r/ppp3pp/2n1k3/3np3/2B5/5Q2/PPPP1PPP/RNB1K2R w KQ - 2 8",
+            "label": "Accepting the sacrifice",
+            "evalCp": 410,
+            "caption": "After 6.Nxf7 Kxf7 7.Qf3+ Ke6 — material is close to level, but Black's king is stuck in the center."
+          },
+          "right": {
+            "fen": "r1bqkb1r/ppp2ppp/2n5/3np3/2B5/5N2/PPPP1PPP/RNBQK2R b KQkq - 1 6",
+            "label": "Declining with 6.Nf3",
+            "caption": "White simply retreats. Nothing dramatic happens, and both kings are still safe."
+          },
+          "note": "Notice the right-hand position has no evaluation number pre-supplied above — the shell requests one live from the engine the moment this block scrolls into view (or shows nothing if the engine isn't available in this session, which is fine)."
+        }
+      ]
+    },
+    {
+      "id": "explore",
+      "heading": "Explore the critical position",
+      "blocks": [
+        {
+          "type": "board",
+          "fen": "r1bqkb1r/ppp2ppp/2n2n2/3pp1N1/2B1P3/8/PPPP1PPP/RNBQK2R w KQkq d6 0 5",
+          "orientation": "white",
+          "interactive": true,
+          "analysis": "live",
+          "caption": "Step through the mainline with the buttons or the arrow keys, then keep playing past the end of the line to see what the engine thinks of your own ideas.",
+          "arrows": [{ "from": "g5", "to": "f7" }],
+          "highlights": ["f7"],
+          "line": {
+            "moves": ["exd5", "Nxd5", "Nxf7", "Kxf7", "Qf3+", "Ke6"],
+            "startPly": 8
+          }
+        },
+        {
+          "type": "callout",
+          "variant": "warning",
+          "title": "Warning",
+          "body": "Don't conclude from this chapter that sacrificing for the king is always wrong — White's 6.Nxf7 is a perfectly sound try with the engine behind it. The lesson is about *your* decision-making under time pressure, not about banning a category of move."
+        }
+      ]
+    },
+    {
+      "id": "recap",
+      "heading": "Recap",
+      "blocks": [
+        {
+          "type": "recap",
+          "points": [
+            "An exposed, uncastled king is a standing tax on every future move, not just an immediate tactical target.",
+            "When a sharp, forcing line and a quiet, solid line are both objectively fine, prefer the one that doesn't require you to find several only-moves under a clock.",
+            "The evaluation swing that matters most in your July games happens the moment castling rights are lost — watch for that moment specifically in your next ten games.",
+            "Ask the coach (bottom right) any time a specific line here doesn't match what you'd have played — the live engine on every board can check any idea instantly."
+          ]
+        }
+      ]
+    }
+  ]
+}
