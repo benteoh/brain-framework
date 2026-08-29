@@ -238,3 +238,13 @@ test('GET /transcript keeps its original {role, text, at} shape, with no kind fi
   assert.equal(transcript.length, 1)
   assert.deepEqual(Object.keys(transcript[0]).sort(), ['at', 'role', 'text'])
 })
+
+test('--host is opt-in, and loopback stays the default', async () => {
+  // The transcript is the learner's and nothing here authenticates, so binding
+  // beyond loopback must never happen by accident. The flag exists only for a
+  // WSL distro whose Windows browser cannot reach loopback.
+  const src = await readFile(path.join(import.meta.dirname, '..', 'scripts', 'serve.mjs'), 'utf8')
+  assert.match(src, /host: \{ type: 'string', default: '127\.0\.0\.1' \}/)
+  assert.match(src, /server\.listen\(Number\(values\.port\), values\.host/)
+  assert.doesNotMatch(src, /listen\([^)]*'0\.0\.0\.0'/, 'serve.mjs must not hard-code a non-loopback bind')
+})

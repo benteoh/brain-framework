@@ -234,11 +234,12 @@ async function main(argv) {
       data: { type: 'string' },
       assets: { type: 'string' },
       port: { type: 'string', default: '4390' },
+      host: { type: 'string', default: '127.0.0.1' },
     },
   })
 
   if (!values.html || !values.out) {
-    console.error('Usage: serve.mjs --html <path> --out <path> [--data <path>] [--assets <dir>] [--port N]')
+    console.error('Usage: serve.mjs --html <path> --out <path> [--data <path>] [--assets <dir>] [--port N] [--host ADDR]')
     process.exitCode = 1
     return
   }
@@ -249,8 +250,13 @@ async function main(argv) {
     dataPath: values.data ? path.resolve(values.data) : undefined,
     assetsDir: values.assets ? path.resolve(values.assets) : undefined,
   })
-  server.listen(Number(values.port), '127.0.0.1', () => {
-    console.log(`Studio exercise server listening on http://127.0.0.1:${values.port}/`)
+  // Loopback by default: a session transcript is the learner's, and nothing
+  // here authenticates. `--host` exists for the one case that cannot use
+  // loopback — a WSL distro whose Windows browser cannot reach it — and is an
+  // explicit opt-in to being reachable from the local network.
+  server.listen(Number(values.port), values.host, () => {
+    console.log(`Studio exercise server listening on http://${values.host}:${values.port}/`)
+    if (values.host !== '127.0.0.1') console.log(`  (bound beyond loopback — reachable by anything that can route to this host)`)
   })
 }
 

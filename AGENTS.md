@@ -55,9 +55,13 @@ Run `node skills/brain/scripts/brain.mjs validate` after structural framework ch
 
 ## Development environment
 
-- **WSL**: a Windows browser cannot reach the WSL distro's `localhost`. Get the
-  distro address with `hostname -I | awk '{print $1}'` and hand the user
-  `http://<that-ip>:<port>/<path>`, never a `localhost` URL.
+- **WSL**: `http://localhost:<port>` from a Windows browser usually reaches a
+  server bound to loopback inside the distro, but not always — it depends on
+  the distro's networking mode. Offer both addresses rather than asserting
+  either: `localhost` first, and the distro address from
+  `hostname -I | awk '{print $1}'` as the fallback. A server that must be
+  reachable by the second one has to bind beyond loopback
+  (`serve.mjs --host 0.0.0.0`), which is an explicit opt-in, not a default.
 - **Serving the Studio component pages**: use
   `node plugins/studio/scripts/dev-server.mjs`, not `python3 -m http.server`.
   Two reasons, both of which cost a debugging session to learn:
