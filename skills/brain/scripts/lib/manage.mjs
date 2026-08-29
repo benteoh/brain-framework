@@ -1,7 +1,7 @@
+import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-
 import {
   LOCAL_STATE_PATH,
   MANAGED_FILES_PATH,
@@ -35,6 +35,39 @@ async function exists(file) {
 
 async function sha256(file) {
   return createHash('sha256').update(await readFile(file)).digest('hex')
+}
+
+// What is not source. The framework already answers this once, in its own
+// .gitignore, and a second list here would drift from it — a build artifact
+// would stop being reviewable in the repo and keep being distributed to every
+// vault, which is exactly the failure this exists to prevent. Asking git is
+// exact; when the source is not a git checkout (a tarball, say) nothing is
+// excluded beyond the hardcoded skips in walkFiles.
+async function sourceIgnoredFiles(sourceRoot, relatives) {
+  if (!relatives.length) return new Set()
+  return new Promise((resolve) => {
+    let child
+    try {
+      child = spawn('git', ['-C', sourceRoot, 'check-ignore', '--stdin'], { stdio: ['pipe', 'pipe', 'ignore'] })
+    } catch {
+      resolve(new Set())
+      return
+    }
+    let stdout = ''
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk
+    })
+    // Not a git checkout, or git is absent: distribute everything, as before.
+    child.on('error', () => resolve(new Set()))
+    // Exit 1 means "nothing matched", which is a normal answer, not a failure.
+    child.on('close', (code) => {
+      if (code !== 0 && code !== 1) return resolve(new Set())
+      resolve(new Set(stdout.split('\n').map((line) => portable(line.trim())).filter(Boolean)))
+    })
+    child.stdin.on('error', () => {})
+    child.stdin.end(relatives.join('\n'))
+  })
 }
 
 async function walkFiles(root, current = root) {
@@ -333,11 +366,12 @@ export async function syncInstance({ sourceRoot, targetRoot }) {
     }
   }
 
-  const sourceFiles = await coreFiles(resolvedSourceRoot)
+  const allSourceFiles = await coreFiles(resolvedSourceRoot)
   for (const plugin of manifest.plugins) {
-    sourceFiles.push(...(await pluginFiles(resolvedSourceRoot, plugin.name)))
+    allSourceFiles.push(...(await pluginFiles(resolvedSourceRoot, plugin.name)))
   }
-  sourceFiles.sort()
+  const notSource = await sourceIgnoredFiles(resolvedSourceRoot, allSourceFiles)
+  const sourceFiles = allSourceFiles.filter((relative) => !notSource.has(relative)).sort()
 
   const managedFilesRaw = await readJsonIfExists(path.join(targetRoot, MANAGED_FILES_PATH))
   const trackedFiles = managedFilesRaw?.files ?? {}
@@ -357,22 +391,42 @@ export async function syncInstance({ sourceRoot, targetRoot }) {
       continue
     }
 
-    if (trackedChecksum) {
-      if (!destinationExists) {
-        filesToWrite.push(relative)
-      } else if ((await sha256(destination)) !== trackedChecksum) {
-        conflicts.push(relative)
-      }
-    } else if (destinationExists) {
-      conflicts.push(relative)
-    } else {
+    if (!destinationExists) {
       filesToWrite.push(relative)
+      continue
     }
+
+    // Three-way, because two of these states are not the same thing and used to
+    // be treated as one. A tracked file whose local copy still matches its
+    // tracked checksum is a pristine copy of an *older* version: safe to
+    // overwrite, and the whole point of running sync. Only a local copy that
+    // matches neither the source nor the checksum is an edit worth refusing to
+    // clobber. Collapsing those two left every already-installed file frozen at
+    // the version it was installed at, while sync reported success.
+    const localChecksum = await sha256(destination)
+    if (localChecksum === (await sha256(path.join(resolvedSourceRoot, relative)))) continue
+    if (trackedChecksum && localChecksum === trackedChecksum) filesToWrite.push(relative)
+    else conflicts.push(relative)
+  }
+
+  // Files this tool installed that the source no longer ships — a renamed
+  // script, or something that turned out to be build output. Removed only when
+  // the local copy is still byte-identical to what was installed, so a vault
+  // never loses anything the person touched.
+  const sourceSet = new Set(sourceFiles)
+  const filesToRemove = []
+  for (const [relative, trackedChecksum] of Object.entries(trackedFiles)) {
+    if (sourceSet.has(relative) || ignored.has(relative)) continue
+    const destination = path.join(targetRoot, relative)
+    if (!(await exists(destination))) continue
+    if ((await sha256(destination)) === trackedChecksum) filesToRemove.push(relative)
+    else conflicts.push(relative)
   }
 
   if (conflicts.length) return { status: 'conflict', conflicts: conflicts.sort() }
 
   await copyManagedFiles(resolvedSourceRoot, targetRoot, filesToWrite)
+  for (const relative of filesToRemove) await rm(path.join(targetRoot, relative), { force: true })
 
   const files = {}
   for (const relative of sourceFiles) {
@@ -381,19 +435,40 @@ export async function syncInstance({ sourceRoot, targetRoot }) {
     files[relative] = await sha256(path.join(targetRoot, relative))
   }
 
+  // Read the versions back off the plugins that were just installed, the same
+  // way `addPlugin` does. Rebuilding this list from the manifest instead meant
+  // the manifest could only ever restate what it already said: a plugin version
+  // bump reached the vault as code and never as a recorded version, so the
+  // instance claimed 0.1.0 while running 0.2.0. This file exists to be a
+  // reproducible record, and a record that cannot change is not one.
+  const installedPlugins = []
+  for (const plugin of manifest.plugins) {
+    const pluginDescriptor = JSON.parse(
+      await readFile(path.join(resolvedSourceRoot, 'plugins', plugin.name, 'brain-plugin.json'), 'utf8'),
+    )
+    installedPlugins.push({ name: plugin.name, version: pluginDescriptor.version })
+  }
+
   const metadata = {
     schemaVersion: 1,
     frameworkVersion: descriptor.version,
     files,
     ignoredFiles: managedFilesRaw?.ignoredFiles ?? [],
-    plugins: Object.fromEntries(manifest.plugins.map((plugin) => [plugin.name, { version: plugin.version }])),
+    plugins: Object.fromEntries(installedPlugins.map((plugin) => [plugin.name, { version: plugin.version }])),
   }
   await writeJson(path.join(targetRoot, MANAGED_FILES_PATH), metadata)
+
+  const recordedVersions = new Map(manifest.plugins.map((plugin) => [plugin.name, plugin.version]))
+  if (installedPlugins.some((plugin) => recordedVersions.get(plugin.name) !== plugin.version)) {
+    await writeManifest(targetRoot, { ...manifest, plugins: installedPlugins })
+  }
+
   await writeLocalState(targetRoot, { sourceRoot: resolvedSourceRoot })
 
   return {
-    status: managedFilesRaw ? (filesToWrite.length ? 'updated' : 'unchanged') : 'installed',
+    status: managedFilesRaw ? (filesToWrite.length || filesToRemove.length ? 'updated' : 'unchanged') : 'installed',
     files: filesToWrite,
+    removed: filesToRemove.sort(),
   }
 }
 

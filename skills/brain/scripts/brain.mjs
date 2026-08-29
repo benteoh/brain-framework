@@ -90,7 +90,11 @@ async function main(argv) {
       process.exitCode = 2
       return
     }
-    console.log(`${result.status}: ${result.files.length} managed files`)
+    console.log(`${result.status}: ${result.files.length} managed files written`)
+    if (result.removed?.length) {
+      console.log(`removed ${result.removed.length} no longer shipped by the source:`)
+      for (const file of result.removed) console.log(`- ${file}`)
+    }
     return
   }
 
