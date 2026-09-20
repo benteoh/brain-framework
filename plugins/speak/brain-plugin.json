@@ -1,0 +1,16 @@
+{
+  "name": "speak",
+  "version": "0.1.0",
+  "brain": ">=0.1.0 <0.2.0",
+  "description": "Offline TTS via Piper for language learning — Italian male voice (it_IT-riccardo-x_low) with local wav cache and Studio playback.",
+  "dataRoot": "Speak",
+  "skills": [
+    "speak-italian"
+  ],
+  "provides": [
+    "speak:italian"
+  ],
+  "permissions": {
+    "network": []
+  }
+}

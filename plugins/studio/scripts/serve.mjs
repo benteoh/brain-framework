@@ -163,6 +163,28 @@ export function createStudioServer({ htmlPath, transcriptPath, dataPath, assetsD
       return
     }
 
+    if (req.method === 'GET' && req.url.startsWith('/tts/')) {
+      const wavName = path.basename(req.url)
+      // only allow <hash>.wav to avoid directory traversal
+      if (!/^[a-f0-9]{16}\.wav$/.test(wavName) && wavName !== '_verify.wav') {
+        res.writeHead(400, { 'Content-Type': 'text/plain' })
+        res.end('Invalid wav name')
+        return
+      }
+      const wavPath = path.join('/tmp/brain-tts', wavName)
+      readFile(wavPath).then(
+        (data) => {
+          res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-cache' })
+          res.end(data)
+        },
+        () => {
+          res.writeHead(404, { 'Content-Type': 'text/plain' })
+          res.end('WAV not found')
+        },
+      )
+      return
+    }
+
     if (req.method === 'POST' && req.url === '/update') {
       readJsonBody(req).then(
         (body) => {
