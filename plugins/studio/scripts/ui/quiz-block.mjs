@@ -1,6 +1,14 @@
 import { renderMarkdownInto, setInlineMarkdown } from './markdown.mjs'
 import { createAskAboutButton } from './shared-utils.mjs'
 
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp
+  }
+  return arr
+}
+
 export function createQuizBlock(block, ctx, emitEvent, markSectionProgress) {
   const wrap = document.createElement('div')
   wrap.className = 'block block-quiz'
@@ -15,7 +23,9 @@ export function createQuizBlock(block, ctx, emitEvent, markSectionProgress) {
   optionsWrap.className = 'quiz-options'
   let attempt = 0
 
-  ;(block.options || []).forEach((opt, optIndex) => {
+  const shuffled = shuffleInPlace((block.options || []).map((opt, idx) => ({ ...opt, _origIndex: idx })))
+
+  shuffled.forEach((opt, shuffledIndex) => {
     const row = document.createElement('div')
     const optEl = document.createElement('button')
     optEl.type = 'button'; optEl.className = 'exercise-option'
@@ -32,7 +42,7 @@ export function createQuizBlock(block, ctx, emitEvent, markSectionProgress) {
       optEl.classList.add(opt.correct ? 'correct' : 'incorrect')
       feedbackEl.hidden = false
       setInlineMarkdown(feedbackEl, opt.feedback || (opt.correct ? 'Correct.' : 'Not quite — try another option.'))
-      emitEvent('quiz-answered', ctx.sectionId, ctx.blockIndex, { optionIndex: optIndex, correct: !!opt.correct, attempt })
+      emitEvent('quiz-answered', ctx.sectionId, ctx.blockIndex, { optionIndex: shuffledIndex, originalIndex: opt._origIndex, correct: !!opt.correct, attempt })
       if (opt.correct) markSectionProgress(ctx.sectionId, 'done')
     })
   })

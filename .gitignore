@@ -1,7 +1,6 @@
 node_modules/
 .DS_Store
 *.log
-<<<<<<< Updated upstream
 
 # Studio build output. `plugins/studio/scripts/ui/*.mjs` is the source of truth;
 # anything inlined back out of it is a generated artifact, never a reviewable diff.
@@ -13,8 +12,7 @@ plugins/studio/dist/
 # copy today (its match and replace regexes differ), and it imports `esbuild`,
 # which this repo declares nowhere. See COMPONENTS.md for what a real one owes.
 plugins/studio/scripts/build-shell.mjs
-=======
+
 # Piper voices are large, downloaded locally
 plugins/speak/skills/speak-italian/voices/*.onnx
 plugins/speak/skills/speak-italian/voices/*.onnx.json
->>>>>>> Stashed changes

@@ -256,6 +256,12 @@
   .prose ul, .prose ol { margin: 0 0 0.85rem; padding-left: 1.4rem; }
   .prose li { margin-bottom: 0.3rem; }
   .prose code { background: var(--chip-bg); border-radius: 0.3rem; padding: 0.08rem 0.35rem; font-size: 0.9em; }
+  .prose blockquote { border-left: 3px solid var(--border); margin: 0 0 0.85rem; padding: 0.4rem 0.9rem; color: var(--muted); background: var(--surface-2); border-radius: 0 0.4rem 0.4rem 0; }
+  .prose .table-wrap { overflow-x: auto; margin: 0 0 1rem; -webkit-overflow-scrolling: touch; }
+  .prose table { width: 100%; border-collapse: collapse; font-size: 0.93rem; min-width: 28rem; }
+  .prose thead th { background: var(--chip-bg); font-weight: 700; text-align: left; }
+  .prose th, .prose td { border: 1px solid var(--border); padding: 0.45rem 0.65rem; vertical-align: top; }
+  .prose tbody tr:nth-child(even) { background: var(--surface-2); }
   .prose > *:first-child { margin-top: 0; }
   .prose > *:last-child { margin-bottom: 0; }
 
@@ -2147,10 +2153,10 @@ const Chess = function (fen) {
   }
 
   // Renders a small, injection-safe markdown subset: ## / ### headings,
-  // **bold**, _italic_, `code`, - bullet lists, 1. ordered lists, blank-line
-  // paragraphs, [text](url) links (http/https/mailto only). The source is
-  // HTML-escaped FIRST, then a handful of regexes turn the escaped text into
-  // real tags — so no HTML ever reaches innerHTML except tags this function
+  // **bold**, _italic_, `code`, - bullet lists, 1. ordered lists, | pipe tables,
+  // > blockquotes, blank-line paragraphs, [text](url) links (http/https/mailto only).
+  // The source is HTML-escaped FIRST, then a handful of regexes turn the escaped
+  // text into real tags — so no HTML ever reaches innerHTML except tags this function
   // itself introduced. Never feed this function already-HTML content.
   function renderInlineMarkdown(escaped) {
     var out = escaped;
@@ -2160,6 +2166,34 @@ const Chess = function (fen) {
     });
     out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     out = out.replace(/(^|[^\w])_([^_]+)_(?!\w)/g, '$1<em>$2</em>');
+    return out;
+  }
+
+  function splitRow(line) {
+    var t = line.trim();
+    if (t.charAt(0) === '|') t = t.slice(1);
+    if (t.charAt(t.length - 1) === '|') t = t.slice(0, -1);
+    return t.split('|').map(function (s) { return s.trim(); });
+  }
+  function isTableDelimiter(line) {
+    var t = line.trim();
+    if (!/^[\s\|\-\:]+$/.test(t)) return false;
+    return /---/.test(t);
+  }
+  function renderTable(headerCells, rows) {
+    var out = '<div class="table-wrap"><table><thead><tr>';
+    for (var i = 0; i < headerCells.length; i++) out += '<th>' + renderInlineMarkdown(headerCells[i]) + '</th>';
+    out += '</tr></thead><tbody>';
+    for (var r = 0; r < rows.length; r++) {
+      var rowCells = rows[r];
+      out += '<tr>';
+      for (var c = 0; c < headerCells.length; c++) {
+        var cell = rowCells[c] !== undefined ? rowCells[c] : '';
+        out += '<td>' + renderInlineMarkdown(cell) + '</td>';
+      }
+      out += '</tr>';
+    }
+    out += '</tbody></table></div>';
     return out;
   }
 
@@ -2188,9 +2222,29 @@ const Chess = function (fen) {
     for (var i = 0; i < lines.length; i++) {
       var trimmed = lines[i].trim();
       if (!trimmed) { flushPara(); flushList(); continue; }
+      // Pipe table: header line with | + delimiter line next
+      if (trimmed.indexOf('|') !== -1 && i + 1 < lines.length && isTableDelimiter(lines[i + 1])) {
+        flushPara(); flushList();
+        var headerCells = splitRow(trimmed);
+        i++; // skip delimiter
+        var rows = [];
+        var j = i + 1;
+        while (j < lines.length) {
+          var rowTrim = lines[j].trim();
+          if (!rowTrim) break;
+          if (rowTrim.indexOf('|') === -1) break;
+          if (isTableDelimiter(rowTrim)) break;
+          rows.push(splitRow(rowTrim));
+          j++;
+        }
+        html += renderTable(headerCells, rows);
+        i = j - 1;
+        continue;
+      }
       var m;
       if ((m = trimmed.match(/^###\s+(.*)$/))) { flushPara(); flushList(); html += '<h3>' + renderInlineMarkdown(m[1]) + '</h3>'; continue; }
       if ((m = trimmed.match(/^##\s+(.*)$/))) { flushPara(); flushList(); html += '<h2>' + renderInlineMarkdown(m[1]) + '</h2>'; continue; }
+      if ((m = trimmed.match(/^&gt;\s+(.*)$/))) { flushPara(); flushList(); html += '<blockquote>' + renderInlineMarkdown(m[1]) + '</blockquote>'; continue; }
       if ((m = trimmed.match(/^-\s+(.*)$/))) {
         flushPara();
         if (!listBuffer || listBuffer.type !== 'ul') { flushList(); listBuffer = { type: 'ul', items: [] }; }
@@ -3398,6 +3452,14 @@ const Chess = function (fen) {
     return wrap;
   }
 
+  function shuffleInPlace(arr) {
+    for (var i = arr.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+    }
+    return arr;
+  }
+
   function renderQuizBlock(block, ctx) {
     var wrap = createBlockWrapper('block-quiz', ctx, 'quiz');
     var question = document.createElement('p');
@@ -3409,7 +3471,9 @@ const Chess = function (fen) {
     optionsWrap.className = 'quiz-options';
     var attempt = 0;
 
-    (block.options || []).forEach(function (opt, optIndex) {
+    var shuffled = shuffleInPlace((block.options || []).map(function (opt, idx) { var c = {}; for (var k in opt) c[k] = opt[k]; c._origIndex = idx; return c; }));
+
+    shuffled.forEach(function (opt, shuffledIndex) {
       var row = document.createElement('div');
       var optEl = document.createElement('button');
       optEl.type = 'button';
@@ -3433,7 +3497,7 @@ const Chess = function (fen) {
         optEl.classList.add(opt.correct ? 'correct' : 'incorrect');
         feedbackEl.hidden = false;
         setInlineMarkdown(feedbackEl, opt.feedback || (opt.correct ? 'Correct.' : 'Not quite — try another option.'));
-        emitEvent('quiz-answered', ctx.sectionId, ctx.blockIndex, { optionIndex: optIndex, correct: !!opt.correct, attempt: attempt });
+        emitEvent('quiz-answered', ctx.sectionId, ctx.blockIndex, { optionIndex: shuffledIndex, originalIndex: opt._origIndex, correct: !!opt.correct, attempt: attempt });
         if (opt.correct) markSectionProgress(ctx.sectionId, 'done');
       });
     });
