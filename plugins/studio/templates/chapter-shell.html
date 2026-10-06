@@ -256,6 +256,8 @@
   .prose ul, .prose ol { margin: 0 0 0.85rem; padding-left: 1.4rem; }
   .prose li { margin-bottom: 0.3rem; }
   .prose code { background: var(--chip-bg); border-radius: 0.3rem; padding: 0.08rem 0.35rem; font-size: 0.9em; }
+  .prose pre.code-block { background: var(--surface-2); border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.85rem 1rem; overflow-x: auto; margin: 0 0 0.85rem; }
+  .prose pre.code-block code { background: none; padding: 0; border-radius: 0; font-size: 0.86rem; line-height: 1.5; display: block; white-space: pre; }
   .prose blockquote { border-left: 3px solid var(--border); margin: 0 0 0.85rem; padding: 0.4rem 0.9rem; color: var(--muted); background: var(--surface-2); border-radius: 0 0.4rem 0.4rem 0; }
   .prose .table-wrap { overflow-x: auto; margin: 0 0 1rem; -webkit-overflow-scrolling: touch; }
   .prose table { width: 100%; border-collapse: collapse; font-size: 0.93rem; min-width: 28rem; }
@@ -2222,6 +2224,24 @@ const Chess = function (fen) {
     for (var i = 0; i < lines.length; i++) {
       var trimmed = lines[i].trim();
       if (!trimmed) { flushPara(); flushList(); continue; }
+      // Fenced code block: ``` or ~~~ (3+), with an optional language info string.
+      // The body is emitted verbatim — the whole source was HTML-escaped up front,
+      // so blank lines and indentation survive instead of collapsing into a paragraph.
+      var fence = trimmed.match(/^(`{3,}|~{3,})\s*(.*)$/);
+      if (fence) {
+        flushPara(); flushList();
+        var fenceChar = fence[1].charAt(0);
+        var fenceLen = fence[1].length;
+        var info = fence[2].trim().split(/\s+/)[0];
+        var langClass = info ? ' class="language-' + info.replace(/[^\w-]/g, '') + '"' : '';
+        var closeRe = new RegExp('^' + fenceChar + '{' + fenceLen + ',}\\s*$');
+        var codeBody = [];
+        var k = i + 1;
+        while (k < lines.length && !closeRe.test(lines[k].trim())) { codeBody.push(lines[k]); k++; }
+        html += '<pre class="code-block"><code' + langClass + '>' + codeBody.join('\n') + '</code></pre>';
+        i = k;
+        continue;
+      }
       // Pipe table: header line with | + delimiter line next
       if (trimmed.indexOf('|') !== -1 && i + 1 < lines.length && isTableDelimiter(lines[i + 1])) {
         flushPara(); flushList();

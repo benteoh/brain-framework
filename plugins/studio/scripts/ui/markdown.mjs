@@ -74,6 +74,24 @@ export function renderMarkdown(src) {
     const line = lines[i]
     const trimmed = line.trim()
     if (!trimmed) { flushPara(); flushList(); continue }
+    // Fenced code block: ``` or ~~~ (3+), with an optional language info string.
+    // The body is emitted verbatim — the whole source was HTML-escaped up front,
+    // so blank lines and indentation survive instead of collapsing into a paragraph.
+    const fence = trimmed.match(/^(`{3,}|~{3,})\s*(.*)$/)
+    if (fence) {
+      flushPara(); flushList()
+      const fenceChar = fence[1][0]
+      const fenceLen = fence[1].length
+      const info = fence[2].trim().split(/\s+/)[0]
+      const langClass = info ? ' class="language-' + info.replace(/[^\w-]/g, '') + '"' : ''
+      const closeRe = new RegExp('^' + fenceChar + '{' + fenceLen + ',}\\s*$')
+      const body = []
+      let j = i + 1
+      while (j < lines.length && !closeRe.test(lines[j].trim())) { body.push(lines[j]); j++ }
+      html += '<pre class="code-block"><code' + langClass + '>' + body.join('\n') + '</code></pre>'
+      i = j
+      continue
+    }
     // Table detection: header line with | + delimiter next line
     if (trimmed.includes('|') && i + 1 < lines.length && isTableDelimiter(lines[i + 1])) {
       flushPara(); flushList()
